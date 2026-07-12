@@ -183,11 +183,11 @@ The pipeline skips steps when output files already exist. To re-run a specific s
 | File | Purpose |
 |------|---------|
 | `master_pipeline.py` | Main orchestrator |
-| `src/meta.py` | Manifest parsing and validation |
-| `src/registrations.py` | Registration orchestration (HCR-to-HCR, 2P-to-HCR) |
-| `src/registrations_utils.py` | Registration algorithms |
-| `src/segmentation.py` | Cellpose segmentation, mask alignment, merging |
-| `src/tiling.py` | Tile processing and stitching |
-| `src/auto_stitching.py` | Automated stitching |
-| `src/functional.py` | Suite2p data extraction |
+| `easipass/meta.py` | Manifest parsing and validation |
+| `easipass/registrations.py` | Registration orchestration (HCR-to-HCR, 2P-to-HCR) |
+| `easipass/registrations_utils.py` | Registration algorithms |
+| `easipass/segmentation.py` | Cellpose segmentation, mask alignment, merging |
+| `easipass/tiling.py` | Tile processing and stitching |
+| `easipass/auto_stitching.py` | Automated stitching |
+| `easipass/functional.py` | Suite2p data extraction |
 

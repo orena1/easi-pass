@@ -1,13 +1,13 @@
 import argparse
 from pathlib import Path
-from src import functional as fc
-from src import tiling as tl
-from src import registrations as rf
-from src import registrations_landmarks as rf_landmarks
-from src import meta as mt
-from src import segmentation as sg
-from src import importers as im
-from src.meta import rprint
+from easipass import functional as fc
+from easipass import tiling as tl
+from easipass import registrations as rf
+from easipass import registrations_landmarks as rf_landmarks
+from easipass import meta as mt
+from easipass import segmentation as sg
+from easipass import importers as im
+from easipass.meta import rprint
 
 # This is the main pipeline script that runs the entire pipeline
 

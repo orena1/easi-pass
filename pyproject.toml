@@ -107,4 +107,4 @@ easipass = "master_pipeline:main"
 py-modules = ["master_pipeline"]
 
 [tool.setuptools.packages.find]
-include = ["src*"]
+include = ["easipass*"]
