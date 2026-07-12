@@ -320,11 +320,11 @@ def _register_rounds_legacy(full_manifest):
     rprint("Registration process uses step-by-step jupyter notebooks\n")
 
     rprint("[bold cyan] Step 1): Configure Low-Resolution Parameters[/bold cyan]")
-    rprint("   Notebook: [blue]ezfish_pipeline/src/processing_notebooks/HCR_rounds/1_scan_lowres_parameters.ipynb[/blue]")
+    rprint("   Notebook: [blue]easipass/processing_notebooks/HCR_rounds/[/blue] (HCR registration workflow)")
     rprint(f"   Manifest: [yellow]{full_manifest['manifest_path']}[/yellow]\n")
 
     rprint("[bold cyan] Step 2): Configure High-Resolution Parameters[/bold cyan]")
-    rprint("   Notebook: [blue]ezfish_pipeline/src/processing_notebooks/HCR_rounds/2_scan_highres_parameters.ipynb[/blue]")
+    rprint("   Notebook: [blue]easipass/processing_notebooks/HCR_rounds/[/blue] (HCR registration workflow)")
     rprint(f"   Manifest: [yellow]{full_manifest['manifest_path']}[/yellow]\n")
 
     rprint("[bold cyan] Step 3): Select Registration Rounds[/bold cyan]")
