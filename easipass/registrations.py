@@ -53,11 +53,20 @@ from tifffile import imwrite as tif_imwrite
 from tifffile import imread as tif_imread
 # RBFInterpolator/griddata now handled in registrations_utils.py
 
-# Path for bigstream unless you did pip install
-sys.path = [fr"\\nasquatch\data\2p\jonna\Code_Python\Notebooks_Jonna\BigStream\bigstream_v2_andermann"] + sys.path 
-sys.path = [fr"C:\Users\jonna\Notebooks_Jonna\BigStream\bigstream_v2_andermann"] + sys.path 
-sys.path = [fr'{os.getcwd()}/bigstream_v2_andermann'] + sys.path
-sys.path = ["/mnt/nasquatch/data/2p/jonna/Code_Python/Notebooks_Jonna/BigStream/bigstream_v2_andermann"] + sys.path 
+# bigstream: prefer the pip-installed package (`pip install -e ".[bigstream]"`).
+# Only if it isn't importable, fall back to a local checkout (lab dev machines),
+# adding the first path that actually exists.
+import importlib.util
+if importlib.util.find_spec("bigstream") is None:
+    for _bs in (
+        os.path.join(os.getcwd(), "bigstream_v2_andermann"),
+        "/mnt/nasquatch/data/2p/jonna/Code_Python/Notebooks_Jonna/BigStream/bigstream_v2_andermann",
+        r"\\nasquatch\data\2p\jonna\Code_Python\Notebooks_Jonna\BigStream\bigstream_v2_andermann",
+        r"C:\Users\jonna\Notebooks_Jonna\BigStream\bigstream_v2_andermann",
+    ):
+        if os.path.exists(_bs):
+            sys.path.insert(0, _bs)
+            break
 
 from bigstream.piecewise_transform import distributed_apply_transform
 from ClusterWrap import cluster as cluster_constructor

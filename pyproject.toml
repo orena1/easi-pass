@@ -38,7 +38,7 @@ dependencies = [
     # Config & I/O
     "hjson",
     "pyyaml",
-    "zarr>=2.12",
+    "zarr>=2.12,<3",  # bigstream uses `from zarr import blosc`, removed in zarr 3
     "h5py>=3.8",
     "numcodecs>=0.9",
     "pydantic>=2.7",

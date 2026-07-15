@@ -65,7 +65,7 @@ golden CSV are tracked in git; the imaging data lives on Zenodo (see `fetch_demo
 
    **Answer the prompts as follows:**
    - `Verify 2P cellpose segmentations … press Enter` → press **Enter**.
-   - `Output files exist. Overwrite all? [y/n]` (low-res→hi-res step) → **n**.
+   - `Overwrite? [y/n]` (the `[registration] Existing output found …` prompt, low-res→hi-res step) → **n**.
      This keeps the shipped 2P *placement*. The automated SIFT placement is fragile in
      the tiff-only path (on this plane it lands ~100 px off, which makes the 2P→HCR
      overlay come out stringy); the shipped placement is the production one, so the

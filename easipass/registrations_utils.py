@@ -53,8 +53,11 @@ def prompt_overwrite_per_plane(plane_idx: int, output_path: Path, overwrite_stat
         return overwrite_state[0]
 
     # Prompt user once - applies to all planes
+    print(f"\n[registration] Existing output found:\n    {output_path}")
+    print("    y = overwrite / recompute from scratch")
+    print("    n = keep the existing files (choose this if they were provided/pre-seeded)")
     while True:
-        response = input(f"Output files exist. Overwrite all? [y/n]: ").strip().lower()
+        response = input("Overwrite? [y/n]: ").strip().lower()
         if response == 'y':
             overwrite_state[0] = True
             return True
