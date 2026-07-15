@@ -3,13 +3,13 @@
 This is the expected result of running the demo, so you can confirm your own run
 produced something sensible. It is intentionally lightweight — a single small CSV,
 not the multi-GB OUTPUT tree the pipeline generates (HCR masks alone are ~600 MB).
-Ship inputs (`../to_run/`) + this golden output; regenerate the heavy intermediates
+Ship inputs (`../demo_pre_run/`) + this golden output; regenerate the heavy intermediates
 by running the pipeline.
 
 ## `twop_plane0_to_HCR01.csv`
 
 The per-cell 2P→HCR matching table produced at
-`to_run/JS078_demo/OUTPUT/MERGED/aligned_masks/twop_plane0_to_HCR01.csv`.
+`demo_pre_run/JS078_demo/OUTPUT/MERGED/aligned_masks/twop_plane0_to_HCR01.csv`.
 Each row is a candidate 2P↔HCR mask pair; `is_best_match == True` marks the accepted
 1:1 match, and the `somaprint_*` columns are the parallel geometric matcher's call.
 (The full per-cell feature table joined to the 5 HCR gene channels is also produced,

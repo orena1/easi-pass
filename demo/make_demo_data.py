@@ -28,7 +28,7 @@ What it does
 
 Run on any box that can see the full JS078 folder:
     python make_demo_data.py --src /mnt/nasquatch/data/2p/jonna/EASI_FISH/pipeline/JS078 \
-                             --dst ./to_run/JS078_demo
+                             --dst ./demo_pre_run/JS078_demo
 """
 import argparse
 import shutil
@@ -50,7 +50,7 @@ def copy_verbatim(src: Path, dst: Path, label: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", required=True, help="full JS078 folder")
-    ap.add_argument("--dst", required=True, help="demo mouse folder to write (e.g. to_run/JS078_demo)")
+    ap.add_argument("--dst", required=True, help="demo mouse folder to write (e.g. demo_pre_run/JS078_demo)")
     a = ap.parse_args()
     src, dst = Path(a.src), Path(a.dst)
 

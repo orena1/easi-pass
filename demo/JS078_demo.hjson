@@ -10,10 +10,10 @@
     // =====================================================================
 
     data: {
-        // EDIT THIS to the absolute path of demo/to_run on your machine
+        // EDIT THIS to the absolute path of demo/demo_pre_run on your machine
         // (fetch_demo_data.py downloads the data into that folder).
-        // e.g. "/home/you/ezfish_pipeline/demo/to_run"
-        base_path: "/EDIT_ME/ezfish_pipeline/demo/to_run"
+        // e.g. "/home/you/ezfish_pipeline/demo/demo_pre_run"
+        base_path: "/EDIT_ME/ezfish_pipeline/demo/demo_pre_run"
         mouse_name: "JS078_demo"
 
         two_photon_imaging: {

@@ -57,7 +57,9 @@ easipass/processing_notebooks/HCR_rounds/twop_to_hcr_*_outputs/
 .wtd5l0tx/
 
 # Demo: ship the scaffold (manifest, scripts, README, golden CSV); the heavy
-# imaging data in to_run/ is hosted on Zenodo and fetched by fetch_demo_data.py
-demo/to_run/
+# imaging data (demo_pre_run/ + demo_post_run/) is hosted on Zenodo and fetched
+# by fetch_demo_data.py
+demo/demo_pre_run/
+demo/demo_post_run/
 # Local test manifest with a concrete base_path (the shipped one keeps a placeholder)
 demo/*.local.hjson
