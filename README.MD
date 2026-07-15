@@ -4,7 +4,7 @@ Automated image processing pipeline for **2-photon (2P) microscopy** and **HCR c
 
 ## Installation
 
-Requires **Linux** with an **NVIDIA GPU (CUDA)** and [conda](https://docs.conda.io/). The segmentation backend is **Cellpose 4 (cellpose-SAM)**.
+Requires **Linux** and [conda](https://docs.conda.io/). An **NVIDIA GPU (CUDA)** is strongly recommended — the demo runs on CPU, but full datasets are impractically slow without one. The segmentation backend is **Cellpose 4 (cellpose-SAM)**.
 
 ```bash
 conda env create -f environment.yml   # conda-only packages (Python 3.12, PyTorch + CUDA)
@@ -26,6 +26,8 @@ pip install -e ".[all]"               # the pipeline + all Python dependencies
 
 ## Quickstart
 
+**New here? Run the demo first.** [`demo/`](demo/README.md) is a small, real, end-to-end example — one 2P image aligned to an HCR volume — with downloadable data and a reference result to check against. It's the fastest way to confirm your install works and to see the pipeline's inputs and outputs. Then come back here for your own data.
+
 1. Copy the appropriate template from `examples/` and fill in your values
 2. Organize your data following the [expected folder structure](#folder-structure)
 3. Run the pipeline on the cluster:
@@ -45,7 +47,20 @@ python master_pipeline.py --manifest examples/your_manifest.hjson --only_hcr
 | **HCR-only** | `--only_hcr` | `demo_hcr_only.hjson` | You only have HCR confocal data, no 2P |
 | **Full + hi-res** | (none) | `demo_hires.hjson` | 2P + HCR, with high-res anatomical tile runs |
 | **Full + standard** | (none) | `demo_standard.hjson` | 2P + HCR, no high-res tiles (uses Suite2p mean image directly) |
+| **Stills / image-align** | `--tiff_only` | `demo/JS078_demo.hjson` | Align a static 2P image (not a movie) to HCR — no activity traces |
 | **General template** | (none) | `demo.hjson` | All options documented with comments |
+
+### 2P input formats
+
+How the 2P side is read is set per session by `input_format` (in the manifest's `two_photon_imaging.sessions`):
+
+| `input_format` | Reads | Activity traces? | Use when |
+|---|---|---|---|
+| `sbx` *(default)* | ScanBox `.sbx` + Suite2p | Yes | In-lab functional recordings |
+| `suite2p` | An existing Suite2p output folder | Yes | You already ran Suite2p |
+| `tiff` | `2P/plane_{N}.tiff` mean image(s) | No | A static 2P image, no movie (pair with `--tiff_only`) |
+
+`tiff` and `suite2p` still do full cross-modal alignment and the molecular join; only the `sbx`/`suite2p` paths yield per-cell activity traces.
 
 ## Pipeline Steps
 
@@ -172,6 +187,15 @@ The pipeline expects this input layout and creates `OUTPUT/` alongside it:
             ├── aligned_masks/
             └── aligned_extracted_features/
                 └── merged_table_plane{N}.csv   ← final output
+```
+
+In **`tiff` mode** the 2P side is a mean-image TIFF per plane instead of the `.sbx` / `suite2p/` layout:
+
+```
+2P/
+├── plane_0.tiff          (2P mean image, low-res)
+├── plane_0_hires.tiff    (optional hi-res stitched image)
+└── ...
 ```
 
 ## Re-Entry / Resume
