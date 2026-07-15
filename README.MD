@@ -12,6 +12,12 @@ conda activate easipass
 pip install -e ".[all]"               # the pipeline + all Python dependencies
 ```
 
+> **Tip — much faster install.** The conda *classic* solver can spend 10+ minutes on the
+> `environment.yml` step. Use [mamba](https://mamba.readthedocs.io/) instead
+> (`mamba env create -f environment.yml`) or enable the libmamba solver once
+> (`conda install -n base conda-libmamba-solver`, then pass `--solver=libmamba`) to cut the
+> solve from minutes to seconds. Recent conda versions use libmamba by default.
+
 `environment.yml` installs only what must come from conda channels; everything else is declared in `pyproject.toml` and installed by the `pip` step. Install a subset instead of `[all]` if you don't need every stage:
 
 | Command | Adds |
