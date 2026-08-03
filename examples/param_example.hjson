@@ -3,20 +3,20 @@
 // computes the registration IN-PROCESS using cellpose nucleus centroids (no notebook farming),
 // shows a ranked review, and on your selection WRITES HCR_selected_registrations below for you.
 // Omit the global/local blocks (or set either method:"blob") to fall back to the legacy
-// notebook scan workflow. See agent_docs/registration_guide.md.
+// notebook scan workflow.
 HCR_to_HCR_registration:{
     "downsampling":[3, 3, 2]            // [x,y,z] downsample for the global (lowres) stage
 
     "global":{
         "method":"centroid"            // "centroid" (in-pipeline) | "blob" (legacy notebook)
-        "context_radius_um":[40, 60, 80, 100, 150]  // a few values; fast, best auto-picked. ~60um is near-universal
+        "context_radius_um":[40, 60, 80]  // searched (downsampled, cheap); best auto-picked. ~60um is near-universal
         "match_threshold":0.3          // context-correlation cutoff for a centroid match
         "select_metric":"mi"           // pick best radius: "mi" (default) | "median_resid" | "above_chance" (all guarded vs worse-than-chance)
         // no rotation cap: the RANSAC affine is used as-is
     }
     "local":{
         "method":"centroid"            // "centroid" | "blob"
-        "blocksize":[[400,400,20], [300,300,15], [200,200,10]]  // tried; best (lowest residual) picked
+        "blocksize":[[200,200,10]]     // fixed winner (cortex+PBN screen); add more here to search if tissue differs
         "overlap":0.5
         "context_radius":[12, 12, 2]   // block context window in VOXELS (current local style)
         // "context_radius_um":60       // OPT-IN: use a um-window for blocks instead (experiment)
@@ -45,7 +45,6 @@ HCR_selected_registrations:{
 // 2P -> HCR registration: commonly tuned knobs.
 // Lower-tier params (RANSAC, FFT-IoU thresholds, coarse-match patches) are read
 // from this same block but fall through to defaults if not specified.
-// Full tiered guide: agent_docs/parameter_tuning.md.
 twop_to_hcr_registration:{
     "cascade_stages":[400, 200, 100],   // strictly-decreasing tile sizes (px); default [300, 100, 50]
     "erosion":2,                        // 2P mask shrink (px); 0 for cp4-SAM masks
@@ -53,7 +52,14 @@ twop_to_hcr_registration:{
     "z_range_global":[-15, 15],         // z-offset search range (slices); widen to [-25, 25] for large z offset
     "xy_max_global":500,                // xy search range (px); raise to 600 if landmarks coarse
     "hull_margin":-100,                 // inward hull erosion (px, negative); less negative (-50) for poor landmark coverage
-    "flip_z":false                      // true when HCR acquisition has inverted z-axis
+    "flip_z":false,                     // true when HCR acquisition has inverted z-axis
+    // Neighborhood-agreement term for each 2P->HCR match: the any-cell foreground
+    // IoU in a window around the cell, REPORTED as twoP_neighborhood_iou in the
+    // merged table alongside twoP_iou. It never drops matches — threshold it
+    // yourself downstream (high candidate IoU + low neighborhood IoU flags a
+    // spurious single-cell overlap in a partially-aligned region).
+    "report_neighborhood_iou":true,     // set false to omit the column
+    "neighborhood_window_px":50         // XY window side length (px)
 }
 
 // Measure cellpose + mRNA/neuropil on the un-warped HCR rounds, warping only the

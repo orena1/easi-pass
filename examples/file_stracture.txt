@@ -1,6 +1,6 @@
 This is the data-structure that is required to use our pipeline.
 See demo.json for the corresponding 
-ezfish/
+easipass/
 └── jonna/
     └── RG026/
         ├── 2P/
@@ -128,4 +128,4 @@ ezfish/
                         └── cell_type_clustering.png
 
 
-https://tree.nathanfriend.io/?s=(%27options!(%27fancy!true~fullPath!false~trailingSlash!true~rootDot!false)~9(%279%27ezfish8jonna8*7-2P.1.2.3-E515253-OUTPUTB2PB*tileB**BE%27)~version!%271%27)*%20%20-8**.B241226_7_005B7_E07JSA0128%5Cn*9source!B-*EHCR%01EB9875.-*
+https://tree.nathanfriend.io/?s=(%27options!(%27fancy!true~fullPath!false~trailingSlash!true~rootDot!false)~9(%279%27easipass8jonna8*7-2P.1.2.3-E515253-OUTPUTB2PB*tileB**BE%27)~version!%271%27)*%20%20-8**.B241226_7_005B7_E07JSA0128%5Cn*9source!B-*EHCR%01EB9875.-*

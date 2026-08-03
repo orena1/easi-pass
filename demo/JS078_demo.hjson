@@ -1,0 +1,63 @@
+{
+    // =====================================================================
+    //  JS078 DEMO manifest  —  in vivo 2P mean image -> ex vivo HCR volume
+    //
+    //  A small, real, runnable example (one plane, one HCR round, full-frame
+    //  volume). Full walkthrough + expected output: demo/README.md
+    //
+    //  Run (from the repo root, in the cp4 / cellpose-SAM env):
+    //    python master_pipeline.py --manifest demo/JS078_demo.hjson --tiff_only
+    // =====================================================================
+
+    data: {
+        // EDIT THIS to the absolute path of demo/demo_pre_run on your machine
+        // (fetch_demo_data.py downloads the data into that folder).
+        // e.g. "/home/you/ezfish_pipeline/demo/demo_pre_run"
+        base_path: "/EDIT_ME/ezfish_pipeline/demo/demo_pre_run"
+        mouse_name: "JS078_demo"
+
+        two_photon_imaging: {
+            sessions: [{
+                date: "260407"              // free-form label; not used to find files in tiff mode
+                input_format: "tiff"        // read 2P/plane_0.tiff (+ optional plane_0_hires.tiff)
+                functional_plane: ["0"]     // single plane in this demo
+            }]
+        }
+
+        HCR_confocal_imaging: {
+            // One round, 5 channels. DAPI is channel 0 (used for cell segmentation).
+            rounds: [
+                { round: "01", channels: ["DAPI", "PV", "GCAMP", "SST", "TDTOMATO"], resolution: [1.136, 1.136, 7.5] }
+            ]
+            reference_round: "01"
+        }
+    }
+
+    params: {
+        // Automated registration (no interactive BigWarp during the run).
+        // twop_to_hcr still uses the seed landmarks shipped at
+        // OUTPUT/2P/registered/hires_stitched_plane0_to_HCR1_landmarks.csv
+        automation: {
+            lowres_to_hires: "auto"     // SIFT: align low-res 2P mean to the hi-res stitched image
+            twop_to_hcr: "auto"         // refine the seed landmarks + cascade
+        }
+
+        // Coarse orientation of the 2P image relative to HCR (eyeballed once).
+        rotation_2p_to_HCR: { rotation: 0, fliplr: true, flipud: true }
+
+        // ---- Segmentation (Cellpose 4 / cellpose-SAM; "cpsam" auto-downloads) ----
+        HCR_cellpose: { model_path: "cpsam", diameter: 23, gpu: true, flow_threshold: 0.6, cellprob_threshold: -1, cellpose_channel: 0 }
+        2p_cellpose:  { model_path: "cpsam", diameter: 8,  gpu: true, flow_threshold: 0.6, cellprob_threshold: 0,  cellpose_channel: 0 }
+
+        // ---- Registration ----
+        HCR_to_HCR_registration: { downsampling: [3, 3, 2] }   // (single round here -> near identity)
+        twop_to_hcr_registration: { erosion: 0, erosion_hcr: 0 }
+        lowres_to_hires_registration: { tile_size: 454, tile_overlap: 0.3, percentile_norm: [2, 98], max_tile_shift: 40, min_matches: 3 }
+
+        // Geometric 2P->HCR matcher that runs alongside IoU (adds somaprint columns).
+        somaprint: { enabled: true }
+
+        // Per-cell probe intensity (mean of mask, and neuropil-subtracted mean).
+        intensity_extraction: { neuropil_radius: 50, neuropil_boundary: 1, neuropil_pooling: ["mean"] }
+    }
+}

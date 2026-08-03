@@ -60,7 +60,7 @@ except ImportError:  # running in a notebook / as a flat module
 # and the local threshold-sweep findings (loosened floors 8/4, cc=(12,12,2), mt=0.3).
 _GLOBAL_DEFAULTS = dict(
     method="centroid",
-    context_radius_um=[60.0],        # a few values may be listed; fast, best is auto-picked
+    context_radius_um=[40.0, 60.0, 80.0],  # searched (downsampled, cheap); best auto-picked by select_metric
     match_threshold=0.3,
     select_metric="mi",              # "mi" (default) | "median_resid" | "above_chance"
     inlier_gate_um=12.0,             # reciprocal-NN gate for a "matched" cell (~ a cell spacing)
@@ -68,9 +68,10 @@ _GLOBAL_DEFAULTS = dict(
 )
 _LOCAL_DEFAULTS = dict(
     method="centroid",
-    # Trimmed to the two that win in practice (coarse-robust + fine-detail); the dropped
-    # [300,300,15] middle almost never beat both. Coarse-first so the cheap config runs first.
-    blocksize=[[400, 400, 15], [200, 200, 10]],
+    # Single fixed config: the full-field screen (cortex + PBN, all tiles) showed 200x200x10
+    # wins every time and 400x400x15 loses every time, so the local blocksize search is dropped.
+    # Labs can add more blocksizes in the manifest after a first run if their tissue differs.
+    blocksize=[[200, 200, 10]],
     overlap=0.5,                     # A/B (overlap_ab_sweep.py) showed 0.25 costs quality on BOTH
                                      # samples: JS082 medResid 4.60->5.04um (frac<5 53->50%),
                                      # CIM131 11.62->16.49um (frac<5 34->26%). 0.25 is ~5x cheaper

@@ -1,12 +1,13 @@
 import argparse
 from pathlib import Path
-from src import functional as fc
-from src import tiling as tl
-from src import registrations as rf
-from src import registrations_landmarks as rf_landmarks
-from src import meta as mt
-from src import segmentation as sg
-from src.meta import rprint
+from easipass import functional as fc
+from easipass import tiling as tl
+from easipass import registrations as rf
+from easipass import registrations_landmarks as rf_landmarks
+from easipass import meta as mt
+from easipass import segmentation as sg
+from easipass import importers as im
+from easipass.meta import rprint
 
 # This is the main pipeline script that runs the entire pipeline
 
@@ -169,17 +170,13 @@ def process_plane(full_manifest, session, has_hires):
     # 2. Functional lowres mean image. If stitching prompted and wrote a
     # *_rotated.tiff above, the lowres rotation step below will skip the
     # prompt and pick up the same rotation_config from the updated manifest.
-    if input_format == 'tiff':
-        fc.prepare_tiff_input(full_manifest, session)
-    elif input_format == 'suite2p':
-        fc.prepare_suite2p_input(full_manifest, session)
-    else:
-        has_red = bool(session.get('anatomical_lowres_red_runs'))
-        fc.extract_suite2p_registered_planes(full_manifest, session, combine_with_red=has_red)
+    # Dispatch lives in src/importers.py (behavior-identical across formats).
+    im.load_functional_mean(full_manifest, session)
 
-    # Extract cellpose masks from 2p images. Returns the seg.npy path so the
-    # caller can collect across planes and prompt once at the end.
-    return sg.extract_2p_cellpose_masks(full_manifest, session)
+    # 2P segmentation → seg.npy path (collected across planes; verified once after
+    # the loop). Source is 'compute' (cellpose, default) or 'accept' (rasterize the
+    # user's Suite2p ROIs); dispatch lives in src/importers.py.
+    return im.load_functional_masks(full_manifest, session)
 
 if __name__ == "__main__":
 

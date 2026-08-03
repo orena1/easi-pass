@@ -1,4 +1,4 @@
-src/processing_notebooks/HCR_rounds/.*
+easipass/processing_notebooks/HCR_rounds/.*
 __pycache__/
 **/*.pyc
 **/.ipynb_checkpoints/
@@ -42,16 +42,24 @@ manuscript/
 /native_cellpose_bootstrap.py
 
 # HCR_rounds dev scratch (scripts, caches, sweep outputs)
-src/processing_notebooks/HCR_rounds/_*.py
-src/processing_notebooks/HCR_rounds/_*.pl
-src/processing_notebooks/HCR_rounds/gen_hcr_global_centroid_diagnostic.py
-src/processing_notebooks/HCR_rounds/overlap_ab_sweep.py
-src/processing_notebooks/HCR_rounds/*.pkl
-src/processing_notebooks/HCR_rounds/_sweep_cache/
-src/processing_notebooks/HCR_rounds/alignment_figures/
-src/processing_notebooks/HCR_rounds/edge_correction_cache/
-src/processing_notebooks/HCR_rounds/twop_to_hcr_*_outputs/
+easipass/processing_notebooks/HCR_rounds/_*.py
+easipass/processing_notebooks/HCR_rounds/_*.pl
+easipass/processing_notebooks/HCR_rounds/gen_hcr_global_centroid_diagnostic.py
+easipass/processing_notebooks/HCR_rounds/overlap_ab_sweep.py
+easipass/processing_notebooks/HCR_rounds/*.pkl
+easipass/processing_notebooks/HCR_rounds/_sweep_cache/
+easipass/processing_notebooks/HCR_rounds/alignment_figures/
+easipass/processing_notebooks/HCR_rounds/edge_correction_cache/
+easipass/processing_notebooks/HCR_rounds/twop_to_hcr_*_outputs/
 
 # Ephemeral tool dirs
 .rudfo9b6/
 .wtd5l0tx/
+
+# Demo: ship the scaffold (manifest, scripts, README, golden CSV); the heavy
+# imaging data (demo_pre_run/ + demo_post_run/) is hosted on Zenodo and fetched
+# by fetch_demo_data.py
+demo/demo_pre_run/
+demo/demo_post_run/
+# Local test manifest with a concrete base_path (the shipped one keeps a placeholder)
+demo/*.local.hjson

@@ -53,8 +53,11 @@ def prompt_overwrite_per_plane(plane_idx: int, output_path: Path, overwrite_stat
         return overwrite_state[0]
 
     # Prompt user once - applies to all planes
+    print(f"\n[registration] Existing output found:\n    {output_path}")
+    print("    y = overwrite / recompute from scratch")
+    print("    n = keep the existing files (choose this if they were provided/pre-seeded)")
     while True:
-        response = input(f"Output files exist. Overwrite all? [y/n]: ").strip().lower()
+        response = input("Overwrite? [y/n]: ").strip().lower()
         if response == 'y':
             overwrite_state[0] = True
             return True
@@ -2345,6 +2348,11 @@ def run_local_tile_ransac(twop_binary, hcr_3d_bin, z_map, centroids, cell_df,
                 'centroids': centroids,
                 'cell_df': cell_df,
                 'tile_size': tile_size,
+                'overlap': overlap,
+                'min_cells': min_cells,
+                'min_cells_affine': min_cells_affine,
+                'min_iou': min_iou,
+                'min_gain': min_gain,
                 'border_anchor_spacing': border_anchor_spacing,
                 'smoothing': smoothing,
                 'ny': ny, 'nx': nx,
