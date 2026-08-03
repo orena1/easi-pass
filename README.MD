@@ -1,223 +1,270 @@
 # EASI-PASS
 
-Automated image processing pipeline for **2-photon (2P) microscopy** and **HCR confocal imaging** of mouse brain experiments. Takes raw imaging data and a manifest file, and produces merged cell-identity tables matching 2P functional recordings to HCR molecular markers.
+Align two-photon functional imaging to multi-round in-situ molecular imaging, cell by cell.
+
+EASI-PASS takes a **mean image** from a functional recording and one or more **EASI-FISH
+confocal volumes**, segments cells in both, registers them onto each other, matches cells
+across modalities, and writes a single per-cell table joining functional identity to
+molecular readout. It also runs without any functional data, to register and match cells
+across successive FISH rounds alone.
+
+It is a registration-and-matching pipeline. It does not process raw functional recordings,
+compute ΔF/F, or stitch image tiles — those happen upstream, and EASI-PASS takes their
+output as input.
+
+## What it needs
+
+| Input | Format |
+|---|---|
+| Functional field of view | One 2D **mean image** per plane, TIFF |
+| Molecular rounds | One multi-channel **3D volume** per FISH round, TIFF |
+| *(optional)* Hi-res structural image | A single stitched 2D TIFF per plane, used as an alignment bridge |
+| A few seed landmarks | Placed once in [BigWarp](https://imagej.net/plugins/bigwarp), between one functional plane and the reference FISH volume. Only needed for cross-modal runs — `--only_hcr` needs none, and **the demo ships its landmarks so your first run is non-interactive** |
+
+Everything else is set in a manifest file.
 
 ## Installation
 
-Requires **Linux** and [conda](https://docs.conda.io/). An **NVIDIA GPU (CUDA)** is strongly recommended — the demo runs on CPU, but full datasets are impractically slow without one. The segmentation backend is **Cellpose 4 (cellpose-SAM)**.
+Requires **Linux** and [conda](https://docs.conda.io/). An **NVIDIA GPU (CUDA)** is strongly
+recommended — the demo runs on CPU, but full datasets are impractically slow without one.
+Segmentation uses **Cellpose 4 (cellpose-SAM)**.
 
 ```bash
-conda env create -f environment.yml   # conda-only packages (Python 3.12, PyTorch + CUDA)
+conda env create -f environment.yml   # Python 3.12, PyTorch + CUDA
 conda activate easipass
-pip install -e ".[all]"               # the pipeline + all Python dependencies
+pip install -e ".[all]"               # the pipeline and its Python dependencies
 ```
 
-> **Tip — much faster install.** The conda *classic* solver can spend 10+ minutes on the
-> `environment.yml` step. Use [mamba](https://mamba.readthedocs.io/) instead
-> (`mamba env create -f environment.yml`) or enable the libmamba solver once
-> (`conda install -n base conda-libmamba-solver`, then pass `--solver=libmamba`) to cut the
-> solve from minutes to seconds. Recent conda versions use libmamba by default.
+> **Faster install.** conda's classic solver can spend 10+ minutes on `environment.yml`.
+> Use [mamba](https://mamba.readthedocs.io/) (`mamba env create -f environment.yml`) or the
+> libmamba solver to cut that to seconds. Recent conda versions use libmamba by default.
 
-`environment.yml` installs only what must come from conda channels; everything else is declared in `pyproject.toml` and installed by the `pip` step. Install a subset instead of `[all]` if you don't need every stage:
+`environment.yml` covers only what must come from conda channels; everything else is
+declared in `pyproject.toml`. Install a subset instead of `[all]` if you don't need
+every stage:
 
 | Command | Adds |
-|---------|------|
-| `pip install -e "."` | Core pipeline only |
-| `pip install -e ".[twop]"` | 2-photon ingest (Suite2p, ScanBox reader) |
-| `pip install -e ".[bigstream]"` | BigStream registration deps |
-| `pip install -e ".[notebooks]"` | Jupyter + interactive plotting |
-| `pip install -e ".[analysis]"` | ML/stats for the analysis notebooks |
+|---|---|
+| `pip install -e "."` | Core pipeline |
+| `pip install -e ".[bigstream]"` | Deformable registration for multi-round FISH |
+| `pip install -e ".[notebooks]"` | Jupyter and interactive plotting |
+| `pip install -e ".[analysis]"` | Stats and ML for the analysis notebooks |
 
-> **BigStream fork:** HCR round-to-round registration uses a fork installed from git by `[bigstream]`/`[all]`. To use a local checkout instead: `pip install -e /path/to/bigstream`.
+> **BigStream fork:** multi-round FISH registration installs a pinned fork from git via
+> `[bigstream]`/`[all]`. To use a local checkout instead: `pip install -e /path/to/bigstream`.
 
-## Quickstart
+## Start with the demo
 
-**New here? Run the demo first.** [`demo/`](demo/README.md) is a small, real, end-to-end example — one 2P image aligned to an HCR volume — with downloadable data and a reference result to check against. It's the fastest way to confirm your install works and to see the pipeline's inputs and outputs. Then come back here for your own data.
-
-1. Copy the appropriate template from `examples/` and fill in your values
-2. Organize your data following the [expected folder structure](#folder-structure)
-3. Run the pipeline on the cluster:
+[`demo/`](demo/README.md) is a small, real, end-to-end example — one two-photon plane from
+mouse JS078 aligned to a 5-channel FISH volume, with the data on Zenodo and a reference
+result to check yourself against. It is the fastest way to confirm your install works and
+to see what goes in and what comes out.
 
 ```bash
-# Full pipeline (2P + HCR)
-python master_pipeline.py --manifest examples/your_manifest.hjson
+cd demo
+python fetch_demo_data.py                      # downloads the imaging data
+# edit demo/JS078_demo.hjson: set base_path to demo/demo_pre_run
+cd ..
+python master_pipeline.py --manifest demo/JS078_demo.hjson --tiff_only
+```
 
-# HCR-only mode (no 2P data needed)
+## Running your own data
+
+1. Copy [`examples/param_example.hjson`](examples/param_example.hjson) — every option, documented inline.
+2. Arrange your data as in [Folder structure](#folder-structure).
+3. Run:
+
+```bash
+# Cross-modal: functional mean image + FISH volumes
+python master_pipeline.py --manifest examples/your_manifest.hjson --tiff_only
+
+# Molecular-only: FISH rounds alone, no functional data
 python master_pipeline.py --manifest examples/your_manifest.hjson --only_hcr
 ```
 
-## Execution Modes
-
-| Mode | Flag | Template | When to use |
-|------|------|----------|-------------|
-| **HCR-only** | `--only_hcr` | `demo_hcr_only.hjson` | You only have HCR confocal data, no 2P |
-| **Full + hi-res** | (none) | `demo_hires.hjson` | 2P + HCR, with high-res anatomical tile runs |
-| **Full + standard** | (none) | `demo_standard.hjson` | 2P + HCR, no high-res tiles (uses Suite2p mean image directly) |
-| **Stills / image-align** | `--tiff_only` | `demo/JS078_demo.hjson` | Align a static 2P image (not a movie) to HCR — no activity traces |
-| **General template** | (none) | `demo.hjson` | All options documented with comments |
-
-### 2P input formats
-
-How the 2P side is read is set per session by `input_format` (in the manifest's `two_photon_imaging.sessions`):
-
-| `input_format` | Reads | Activity traces? | Use when |
-|---|---|---|---|
-| `sbx` *(default)* | ScanBox `.sbx` + Suite2p | Yes | In-lab functional recordings |
-| `suite2p` | An existing Suite2p output folder | Yes | You already ran Suite2p |
-| `tiff` | `2P/plane_{N}.tiff` mean image(s) | No | A static 2P image, no movie (pair with `--tiff_only`) |
-
-`tiff` and `suite2p` still do full cross-modal alignment and the molecular join; only the `sbx`/`suite2p` paths yield per-cell activity traces.
-
-## Pipeline Steps
-
-### Full pipeline (2P + HCR)
+## What it does
 
 ```
-Phase 1 — HCR processing (runs once for all rounds)
-  1. HCR round-to-round registration    All rounds → reference round (BigStream)
-  2. HCR cellpose segmentation          3D cell segmentation on registered stacks
-  3. HCR probe intensity extraction      Per-cell fluorescence for each probe
+Molecular side (once, for all rounds)
+  1. Round-to-round registration     Each FISH round -> reference round.
+                                     Cell centroids seed a global affine (RANSAC),
+                                     then block-wise deformable refinement (BigStream).
+  2. 3D segmentation                 Cellpose per plane, linked across planes into 3D cells
+  3. Probe intensity extraction      Per-cell fluorescence per channel, with local background
 
-Phase 2 — 2P processing (per imaging plane)
-  4. Tile processing & stitching         (hi-res mode only) Unwarp + stitch tiles
-  5. Suite2p extraction                  Mean images from functional recordings
-  6. 2P cellpose segmentation            2D cell segmentation on mean images
+Functional side (per plane)
+  4. 2D segmentation                 Cellpose on the mean image
+  5. Low-res -> hi-res placement     Only if a hi-res structural image is supplied
 
-Phase 3 — Cross-modal registration (per plane)
-  7. Low-res → high-res registration     (hi-res mode only) SIFT or landmark-based
-  8. 2P → HCR registration              Landmark-based, with cascade refinement
+Cross-modal (per plane)
+  6. Registration                    Seed landmarks -> thin-plate spline surface through the
+                                     FISH volume -> rigid search -> global affine ->
+                                     coarse-to-fine local tile cascade
+  7. Matching                        Mask overlap (IoU) and soma-print, reported per cell
 
-Phase 4 — Output (per plane)
-  9. Mask alignment                      Match cells across HCR rounds + 2P
- 10. Mask merging                        Final merged feature tables
+Output
+  8. Merged table                    One row per cell: matched identities, per-gene
+                                     intensities across rounds, match-quality scores
 ```
 
-### HCR-only mode (`--only_hcr`)
+With `--only_hcr`, steps 4–7 are skipped and cells are matched across FISH rounds only.
+
+## What you get
+
+The primary product is a per-cell matching table,
+`OUTPUT/MERGED/aligned_masks/twop_plane{N}_to_HCR01.csv`. Each row is a candidate
+functional↔FISH cell pair; `is_best_match` marks the accepted 1:1 call.
+
+| Column | Meaning |
+|---|---|
+| `mask1`, `mask2` | Functional cell id, FISH cell id |
+| `iou`, `iou_at_mask1_z` | Mask overlap, in 3D and in the functional plane |
+| `containment_2p`, `containment_hcr_at_z` | Directional overlap, each way |
+| `mask1_size`, `mask2_size`, `mask2_size_at_mask1_z` | Mask sizes, in voxels |
+| `is_best_match` | The accepted overlap-based 1:1 match |
+| `somaprint_hcr_label` | The independent geometric matcher's call for this cell |
+| `somaprint_best_score`, `somaprint_second_score` | Its best and runner-up scores |
+| `somaprint_confident` | Whether best separates significantly from runner-up |
 
 ```
-  1. HCR round-to-round registration
-  2. HCR cellpose segmentation
-  3. HCR probe intensity extraction
-  4. Mask alignment across HCR rounds
-  5. Merged HCR feature tables
+mask1,mask2,intersection,...,iou_at_mask1_z,...,is_best_match,somaprint_hcr_label,...,somaprint_confident
+1,20646,117,...,0.2875,...,True,20646,...,True
+1,20482,7,...,0.0109,...,False,20646,...,True
+2,18531,0,...,0.0000,...,False,18531,...,False
 ```
 
-## Manifest File (.hjson)
+Both matchers are reported for every cell rather than reconciled for you, so you can set
+your own thresholds. Alongside it, `OUTPUT/MERGED/aligned_extracted_features/full_table_*.pkl`
+joins these matches to the per-gene intensities across all FISH rounds.
 
-The manifest is an [HJSON](https://hjson.github.io/) file (JSON with comments and relaxed syntax) that configures everything about your experiment. It has two top-level sections:
+In the demo, 1,178 of the 1,387 functional cells in the plane are matched — **85%** — with
+a median overlap of 0.29 in the functional plane, and soma-print confidently calls 83%. A
+tracked copy of the table is in [`demo/completed/`](demo/completed/README.md) to diff your
+run against.
 
-### `data` — What you're processing
+## Manifest
+
+The manifest is an [HJSON](https://hjson.github.io/) file — JSON with comments and relaxed
+syntax. It has two top-level sections: `data` (what you're processing) and `params` (how).
+
+### `data`
 
 | Field | Description |
-|-------|-------------|
-| `base_path` | Root path on the cluster (e.g. `/mnt/nasquatch/data/2p/lab/pipeline`) |
-| `mouse_name` | Folder name under base_path for this experiment |
-| `two_photon_imaging.sessions` | 2P session config (date, runs, planes). Only 1 session supported. Omit for `--only_hcr` |
-| `HCR_confocal_imaging.rounds` | List of HCR rounds, each with round number, channel names, and voxel resolution |
-| `HCR_confocal_imaging.reference_round` | Which round all others register to. Pick the one with best signal |
+|---|---|
+| `base_path` | Root directory holding your experiment folders |
+| `mouse_name` | Folder name for this experiment. **Outputs are written under this name** |
+| `HCR_confocal_imaging.rounds` | One entry per FISH round: round id, channel names, voxel resolution |
+| `HCR_confocal_imaging.reference_round` | The round all others register to. Pick the one with the best signal |
+| `two_photon_imaging.sessions` | Functional session config. Omit entirely for `--only_hcr` |
 
-#### 2P session fields
-
-| Field | Description |
-|-------|-------------|
-| `date` | Date string used in folder names: `{mouse}_{date}_{run}` |
-| `functional_run` | Run number containing the `suite2p/` folder |
-| `functional_planes` | Planes to process. **First = reference plane** for HCR landmark alignment |
-| `anatomical_hires_green_runs` | Hi-res tile run numbers (green channel). Paired 1:1 with red |
-| `anatomical_hires_red_runs` | Hi-res tile run numbers (red channel) |
-| `anatomical_lowres_green_runs` | Low-res anatomical run numbers (alternative to hi-res) |
-| `anatomical_lowres_red_runs` | Low-res anatomical run numbers |
-| `unwarp_config` | Distortion correction file (in `{base_path}/Calibration_files_for_unwarping/`) |
-| `unwarp_steps` | Number of unwarp interpolation steps |
-
-> **Note:** Set either hi-res or low-res anatomical runs, not both. Leave both empty to use only the Suite2p mean image.
-
-#### HCR round fields
+Per FISH round:
 
 | Field | Description |
-|-------|-------------|
-| `round` | Round identifier string (e.g. `"01"`, `"02"`) |
-| `channels` | List of channel names. DAPI should always be first (used for registration) |
-| `resolution` | Voxel size `[x, y, z]` in microns — get from your confocal acquisition metadata |
+|---|---|
+| `round` | Round identifier, e.g. `"01"` |
+| `channels` | Channel names. The nuclear/cytoplasmic stain used for registration comes first |
+| `resolution` | Voxel size `[x, y, z]` in microns, from your confocal metadata |
 
-### `params` — How to process it
+Per functional session:
 
-| Section | Required | Description |
-|---------|----------|-------------|
-| `HCR_to_HCR_registration` | Yes | BigStream downsampling factors `[x, y, z]`. Default: `[3, 3, 2]` |
-| `rotation_2p_to_HCR` | For 2P | Coarse rotation/flip to align 2P orientation with HCR |
-| `HCR_cellpose` | Yes | Cellpose model + parameters for HCR 3D segmentation. **Must include `cellpose_channel`** |
-| `2p_cellpose` | For 2P | Cellpose model + parameters for 2P 2D segmentation |
-| `intensity_extraction` | Yes | Neuropil settings for probe intensity measurement |
-| `automation` | No | Override manual steps with automated alternatives (see below) |
-| `HCR_selected_registrations` | Later | Populated during the interactive HCR registration step |
+| Field | Description |
+|---|---|
+| `functional_planes` | Planes to process. **The first is the reference plane** for landmark alignment |
+| `input_format` | How the functional side is read — see below |
 
-#### Automation options
+### `params`
 
-All default to `"manual"`. Set to `"auto"` to use automated alternatives:
+| Section | Description |
+|---|---|
+| `HCR_to_HCR_registration` | Round-to-round global and local registration settings |
+| `HCR_cellpose` | Cellpose model and parameters for 3D FISH segmentation |
+| `2p_cellpose` | Cellpose model and parameters for 2D functional segmentation |
+| `twop_to_hcr_registration` | Cross-modal cascade: tile sizes, search ranges, thresholds |
+| `intensity_extraction` | Background settings for probe intensity measurement |
+| `rotation_2p_to_HCR` | Coarse rotation/flip bringing the functional image into FISH orientation |
 
-| Option | Manual | Auto |
-|--------|--------|------|
-| `twop_to_hcr` | User-provided BigWarp landmarks only | Automated refinement (still needs initial landmarks) |
-| `lowres_to_hires` | BigWarp landmarks + TPS | SIFT feature matching + RANSAC affine |
-| `stitching` | BigStitcher coordinates | SIFT + phase correlation |
+[`examples/param_example.hjson`](examples/param_example.hjson) documents every knob with its
+default and when to change it.
 
-## Folder Structure
+### Functional input formats
 
-The pipeline expects this input layout and creates `OUTPUT/` alongside it:
+Set per session by `input_format`:
+
+| Value | Reads | Use when |
+|---|---|---|
+| `tiff` | `2P/plane_{N}.tiff` mean images | **The standard path.** Any microscope, any preprocessing |
+| `suite2p` | An existing Suite2p output folder | You already ran Suite2p and want the mean image pulled from it |
+| `sbx` | ScanBox `.sbx` via Suite2p | Andermann-lab internal acquisition format |
+
+`tiff` is the path this pipeline is built around and the one the demo uses. `suite2p` is a
+convenience that extracts the mean image for you. `sbx` exists for in-house acquisition and
+is not expected to be useful outside the lab.
+
+> **Note:** `input_format` currently defaults to `sbx` when unset. Set it explicitly to
+> `tiff` in your manifest.
+
+### Hi-res structural images
+
+If you acquired a higher-resolution structural image of the same field, supply it as
+`2P/plane_{N}_hires.tiff` and EASI-PASS will use it as a bridge: the low-res mean image is
+placed into it, and the alignment to the FISH volume is computed at the higher resolution.
+The image must already be stitched.
+
+> **On tile stitching.** `easipass/tiling.py` and `easipass/auto_stitching.py` do assemble
+> tiles into a stitched field, by phase correlation between adjacent tiles with a
+> median-shift consensus layout. This works, but it assumes our ScanBox acquisition's tile
+> geometry and naming, so it is **not a supported general feature** — supply an
+> already-stitched image instead. Generalizing it mainly needs an agreed tile-input format
+> (per-tile files plus a nominal grid position); that is an open contribution we'd welcome.
+
+## Folder structure
 
 ```
 {base_path}/
 └── {mouse_name}/
     ├── 2P/
-    │   ├── {mouse}_{date}_{run}/
-    │   │   ├── {mouse}_{date}_{run}.sbx
-    │   │   └── suite2p/          (for functional run)
+    │   ├── plane_0.tiff           mean image, low-res
+    │   ├── plane_0_hires.tiff     optional stitched hi-res structural image
     │   └── ...
     ├── HCR/
-    │   ├── {mouse}_HCR01.tif     (reference round)
-    │   ├── {mouse}_HCR02.tif     (additional rounds)
+    │   ├── {mouse}_HCR01.tiff     reference round
+    │   ├── {mouse}_HCR02.tiff     additional rounds
     │   └── ...
-    └── OUTPUT/                   (created by pipeline)
+    └── OUTPUT/                    created by the pipeline
         ├── HCR/
         │   ├── full_registered_stacks/
         │   ├── cellpose/
-        │   ├── registrations/
         │   └── extract_intensities/
         ├── 2P/
         │   ├── cellpose/
-        │   ├── suite2p/
-        │   ├── tile/             (hi-res mode only)
         │   └── registered/
         └── MERGED/
             ├── aligned_masks/
-            └── aligned_extracted_features/
-                └── merged_table_plane{N}.csv   ← final output
+            └── aligned_extracted_features/   <- final per-cell tables
 ```
 
-In **`tiff` mode** the 2P side is a mean-image TIFF per plane instead of the `.sbx` / `suite2p/` layout:
+## Re-running
 
-```
-2P/
-├── plane_0.tiff          (2P mean image, low-res)
-├── plane_0_hires.tiff    (optional hi-res stitched image)
-└── ...
-```
+The pipeline skips a step when its output already exists. Delete a step's output files to
+re-run just that step, or the whole `OUTPUT/` folder for a clean run.
 
-## Re-Entry / Resume
-
-The pipeline skips steps when output files already exist. To re-run a specific step, delete its output files. To re-run everything, delete the entire `OUTPUT/` folder.
-
-## Key Source Files
+## Source layout
 
 | File | Purpose |
-|------|---------|
-| `master_pipeline.py` | Main orchestrator |
+|---|---|
+| `master_pipeline.py` | Orchestrator and CLI |
 | `easipass/meta.py` | Manifest parsing and validation |
-| `easipass/registrations.py` | Registration orchestration (HCR-to-HCR, 2P-to-HCR) |
-| `easipass/registrations_utils.py` | Registration algorithms |
 | `easipass/segmentation.py` | Cellpose segmentation, mask alignment, merging |
-| `easipass/tiling.py` | Tile processing and stitching |
-| `easipass/auto_stitching.py` | Automated stitching |
-| `easipass/functional.py` | Suite2p data extraction |
+| `easipass/registrations.py` | Registration orchestration |
+| `easipass/registrations_utils.py` | Cross-modal registration algorithms |
+| `easipass/hcr_centroid_registration.py` | Centroid-seeded round-to-round registration |
+| `easipass/somaprint.py` | Geometric cross-modal cell matcher |
+| `easipass/somaprint_hcr.py` | Geometric round-to-round cell matcher |
 
+## Citation
+
+If you use EASI-PASS, please cite ‹paper›.
+
+## License
+
+See [LICENSE](LICENSE).
