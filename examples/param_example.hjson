@@ -9,14 +9,14 @@ HCR_to_HCR_registration:{
 
     "global":{
         "method":"centroid"            // "centroid" (in-pipeline) | "blob" (legacy notebook)
-        "context_radius_um":[40, 60, 80, 100, 150]  // a few values; fast, best auto-picked. ~60um is near-universal
+        "context_radius_um":[40, 60, 80]  // searched (downsampled, cheap); best auto-picked. ~60um is near-universal
         "match_threshold":0.3          // context-correlation cutoff for a centroid match
         "select_metric":"mi"           // pick best radius: "mi" (default) | "median_resid" | "above_chance" (all guarded vs worse-than-chance)
         // no rotation cap: the RANSAC affine is used as-is
     }
     "local":{
         "method":"centroid"            // "centroid" | "blob"
-        "blocksize":[[400,400,20], [300,300,15], [200,200,10]]  // tried; best (lowest residual) picked
+        "blocksize":[[200,200,10]]     // fixed winner (cortex+PBN screen); add more here to search if tissue differs
         "overlap":0.5
         "context_radius":[12, 12, 2]   // block context window in VOXELS (current local style)
         // "context_radius_um":60       // OPT-IN: use a um-window for blocks instead (experiment)
