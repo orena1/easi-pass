@@ -205,11 +205,23 @@ def _rotate_plane(full_manifest, save_filename_C, save_path_registered, function
     # Apply rotation
     data = tif_imread(str(save_filename_C))
     print(f"  Loaded {save_filename_C.name if hasattr(save_filename_C, 'name') else save_filename_C}: shape={data.shape}, dtype={data.dtype}")
-    # Hires tiff inputs may be multi-dimensional (ZCYX, CYX, etc.) — reduce to 2D
+    # Hires tiff inputs may be multi-dimensional (ZCYX, CYX, etc.). Reduce the genuine
+    # extra dimensions but KEEP a leading channel axis: the anatomical hires is green +
+    # red, and red is what makes the flip/rotation judgeable against HCR in BigWarp.
+    # The rotation below is already channel-aware (rotates per channel, writes CYX), and
+    # prepare_tiff_input uses this same shape[0] in (1, 2) convention to autodetect
+    # channels on the lowres input. Collapsing to data[0] here dropped red silently.
     if output_name:
-        while data.ndim > 2:
+        while data.ndim > 3:
             print(f"  Reducing {data.ndim}D array (shape {data.shape}) → taking [0]")
             data = data[0]
+        if data.ndim == 3 and data.shape[0] > 2:
+            print(f"  Reducing Z stack (shape {data.shape}) → taking [0]")
+            data = data[0]
+        if data.ndim == 3 and data.shape[0] == 1:
+            data = data[0]
+        if data.ndim == 3:
+            print(f"  Keeping {data.shape[0]} channels (shape {data.shape})")
     if data.ndim not in (2, 3):
         raise ValueError(f"Unexpected image dimensions {data.ndim} (shape {data.shape}) for {save_filename_C}")
     for k in rotation_config:
