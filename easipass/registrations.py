@@ -276,6 +276,25 @@ def verify_rounds(full_manifest, parse_registered = False, print_rounds = False,
     return round_to_rounds, reference_round, ready_to_apply
 
 
+def publish_reference_round(full_manifest):
+    """Copy the reference HCR round into full_registered_stacks and return its path.
+
+    Both the 2P->HCR landmark placement and the cascade that follows read the
+    reference volume from here, and it is the acquired volume verbatim -- no
+    segmentation, no round-to-round warp. Publishing it separately lets the manual
+    landmark work happen before any cellpose runs. Idempotent; register_rounds
+    calls it too, so the ordering in master_pipeline is free to change.
+    """
+    _, reference_round, _ = verify_rounds(full_manifest, func='publish-reference')
+    path = (output_root(full_manifest) / 'HCR' / 'full_registered_stacks'
+            / f"HCR{reference_round['round']}.tiff")
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(reference_round['image_path'], path)
+        rprint(f"[green]✓ Reference round HCR{reference_round['round']} ready in full_registered_stacks[/green]")
+    return path
+
+
 def register_rounds(full_manifest):
     
     """
@@ -284,13 +303,7 @@ def register_rounds(full_manifest):
     manifest = full_manifest['data']
     round_to_rounds, reference_round, ready_to_apply = verify_rounds(full_manifest)
 
-    # The 2P->HCR step reads the reference round from full_registered_stacks, so publish it
-    # before any round-to-round work — which may be skipped or deferred entirely.
-    reference_round_full_stack_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
-    if not reference_round_full_stack_path.exists():
-        reference_round_full_stack_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(reference_round['image_path'], reference_round_full_stack_path)
-        rprint(f"[green]✓ Reference round HCR{reference_round['round']} ready in full_registered_stacks[/green]")
+    publish_reference_round(full_manifest)
 
     if full_manifest.get('check_alignment'):
         rprint("\n[bold cyan]Round-to-round registration deferred until the alignment check passes[/bold cyan]")
@@ -816,6 +829,87 @@ def register_lowres_to_hires(full_manifest, session):
     rprint(f"[green]Low-res to high-res registration complete.[/green] QA: {qa_dir.name}/")
 
 
+def lowres_rotated_image(full_manifest, plane):
+    """Rotated low-res 2P mean image for the given plane.
+
+    _rotate_plane names its output after the channel set it was handed, so a
+    two-channel input lands as ..._C01_..._rotated.tiff and a single-channel one as
+    ..._C0_..._rotated.tiff. Prefer two channels when present: green plus red is
+    easier to landmark against the HCR volume than green alone.
+    """
+    reg_dir = output_root(full_manifest) / '2P' / 'registered'
+    for channels in ('C01', 'C0'):
+        candidate = reg_dir / f'lowres_meanImg_{channels}_plane{plane}_rotated.tiff'
+        if candidate.exists():
+            return candidate
+    return reg_dir / f'lowres_meanImg_C0_plane{plane}_rotated.tiff'
+
+
+def ensure_twop_to_hcr_landmarks(full_manifest, has_hires, reference_plane,
+                                 reference_round=None, automation_enabled=False):
+    """Resolve the 2P->HCR landmark file, prompting for BigWarp if it is missing.
+
+    Split out of twop_to_hcr_registration so the manual placement can happen before
+    any segmentation runs. Both images BigWarp opens are intensity data that exists
+    straight out of the per-plane prep: the acquired HCR volume copied by
+    publish_reference_round, and the rotated 2P mean (or the stitched hi-res image).
+    Nothing here reads cellpose output -- the masks are consumed by the cascade
+    downstream, once the landmarks exist.
+
+    Returns (landmarks_path, landmarks_source, twop_ref_image_path). Idempotent:
+    twop_to_hcr_registration calls it again and finds the file already placed.
+    """
+    if reference_round is None:
+        _, reference_round, _ = verify_rounds(full_manifest, func='landmark-check')
+
+    hcr_ref_round_path = (output_root(full_manifest) / 'HCR' / 'full_registered_stacks'
+                          / f"HCR{reference_round['round']}.tiff")
+    landmarks_dir = output_root(full_manifest) / '2P' / 'registered'
+    # Reference round number for file naming (strip leading zeros: "01" -> "1")
+    hcr_ref = str(int(reference_round['round']))
+
+    # WORKFLOW DETECTION: which 2P image the landmarks are placed on.
+    if has_hires:
+        twop_ref_image_path = landmarks_dir / f'hires_stitched_plane{reference_plane}_rotated.tiff'
+        prefix, image_label = "hires_stitched_", "HIGH-RES STITCHED 2P image"
+        rprint(f"[dim]Mode: high-res stitched[/dim]")
+    else:
+        # The rotated mean image, not the rotated masks: landmarks go on intensity,
+        # and this file is written by the per-plane prep before cellpose runs.
+        twop_ref_image_path = lowres_rotated_image(full_manifest, reference_plane)
+        prefix, image_label = "", "LOW-RES 2P mean image"
+        rprint(f"[dim]Mode: standard low-res[/dim]")
+
+    landmarks_path, landmarks_source = auto.find_landmark_file(
+        landmarks_dir, reference_plane, prefix=prefix, hcr_ref=hcr_ref)
+
+    if landmarks_path is None:
+        expected_path = landmarks_dir / f"{prefix}plane{reference_plane}_to_HCR{hcr_ref}_landmarks.csv"
+
+        # Landmarks are required in both manual and auto mode
+        # (auto mode refines them, but still needs them as a starting point)
+        mode_note = "\n  (auto mode will refine these)" if automation_enabled else ""
+        instructions = (
+            f"In BigWarp, open these two images:\n"
+            f"  Moving: {twop_ref_image_path}\n"
+            f"  Target: {hcr_ref_round_path}\n\n"
+            f"  Place landmarks mapping the {image_label} to the HCR reference round.{mode_note}"
+        )
+
+        auto.prompt_for_missing_file(
+            expected_path,
+            f"2P-to-HCR landmarks for Plane {reference_plane}",
+            instructions=instructions
+        )
+
+        # Re-check after user creates file
+        landmarks_path, landmarks_source = auto.find_landmark_file(
+            landmarks_dir, reference_plane, prefix=prefix, hcr_ref=hcr_ref)
+
+    rprint(f"[dim]Using {landmarks_source} landmarks: {landmarks_path.name}[/dim]")
+    return landmarks_path, landmarks_source, twop_ref_image_path
+
+
 def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation_enabled=False):
     """
     Register 2P masks to HCR reference space.
@@ -959,69 +1053,14 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     round_to_rounds, reference_round, register_rounds = verify_rounds(full_manifest, parse_registered = True,
                                                                     print_rounds = False, print_registered = False)
 
-    # HCR paths
+    # HCR paths. The masks are only read further down, after the landmarks are in
+    # hand -- see ensure_twop_to_hcr_landmarks for why that matters.
     hcr_ref_round_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
     hcr_ref_masks_path = output_root(full_manifest) / 'HCR' / 'cellpose_aligned' / f"HCR{reference_round['round']}_masks.tiff"
 
-    # WORKFLOW DETECTION: Choose reference image and landmarks based on has_hires
-    landmarks_dir = output_root(full_manifest) / '2P' / 'registered'
-    # Reference round number for file naming (strip leading zeros: "01" -> "1")
-    hcr_ref = str(int(reference_round['round']))
-
-    if has_hires:
-        twop_ref_image_path = output_root(full_manifest) / '2P' / 'registered' / f'hires_stitched_plane{REFERENCE_PLANE}_rotated.tiff'
-        landmarks_path, landmarks_source = auto.find_landmark_file(
-            landmarks_dir, REFERENCE_PLANE, prefix="hires_stitched_", hcr_ref=hcr_ref
-        )
-        rprint(f"[dim]Mode: high-res stitched[/dim]")
-    else:
-        twop_ref_image_path = output_root(full_manifest) / '2P' / 'cellpose' / f'lowres_meanImg_C0_plane{REFERENCE_PLANE}_seg_rotated.tiff'
-        landmarks_path, landmarks_source = auto.find_landmark_file(
-            landmarks_dir, REFERENCE_PLANE, prefix="", hcr_ref=hcr_ref
-        )
-        rprint(f"[dim]Mode: standard low-res[/dim]")
-
-    # Check if landmarks exist
-    if landmarks_path is None:
-        expected_name = f"{'hires_stitched_' if has_hires else ''}plane{REFERENCE_PLANE}_to_HCR{hcr_ref}_landmarks.csv"
-        expected_path = landmarks_dir / expected_name
-
-        # Landmarks are required in both manual and auto mode
-        # (auto mode refines them, but still needs them as a starting point)
-        mode_note = "\n  (auto mode will refine these)" if automation_enabled else ""
-
-        # Build clear instructions telling user which files to open in BigWarp
-        if has_hires:
-            twop_file = f"hires_stitched_plane{REFERENCE_PLANE}_rotated.tiff"
-            twop_file_path = output_root(full_manifest) / '2P' / 'registered' / twop_file
-            instructions = (
-                f"In BigWarp, open these two images:\n"
-                f"  Moving: {twop_file_path}\n"
-                f"  Target: {hcr_ref_round_path}\n\n"
-                f"  Place landmarks mapping the HIGH-RES STITCHED 2P image to the HCR reference round.{mode_note}"
-            )
-        else:
-            twop_file = f"lowres_meanImg_C0_plane{REFERENCE_PLANE}_seg_rotated.tiff"
-            twop_file_path = output_root(full_manifest) / '2P' / 'cellpose' / twop_file
-            instructions = (
-                f"In BigWarp, open these two images:\n"
-                f"  Moving: {twop_file_path}\n"
-                f"  Target: {hcr_ref_round_path}\n\n"
-                f"  Place landmarks mapping the LOW-RES 2P image to the HCR reference round.{mode_note}"
-            )
-
-        auto.prompt_for_missing_file(
-            expected_path,
-            f"2P-to-HCR landmarks for Plane {REFERENCE_PLANE}",
-            instructions=instructions
-        )
-
-        # Re-check after user creates file
-        landmarks_path, landmarks_source = auto.find_landmark_file(
-            landmarks_dir, REFERENCE_PLANE, prefix="hires_stitched_" if has_hires else "", hcr_ref=hcr_ref
-        )
-
-    rprint(f"[dim]Using {landmarks_source} landmarks: {landmarks_path.name}[/dim]")
+    landmarks_path, landmarks_source, twop_ref_image_path = ensure_twop_to_hcr_landmarks(
+        full_manifest, has_hires, REFERENCE_PLANE,
+        reference_round=reference_round, automation_enabled=automation_enabled)
 
     # Create output folders
     output_folder = output_root(full_manifest) / 'MERGED' / 'aligned_masks'

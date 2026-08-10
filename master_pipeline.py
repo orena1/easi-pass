@@ -37,17 +37,18 @@ def main(args = None):
     if automation['twop_to_hcr'] == 'auto':
         rprint(f"[bold cyan]Automation enabled:[/bold cyan] twop_to_hcr={automation['twop_to_hcr']}")
 
-    # HCR processing - runs once regardless of number of 2P planes.
-    # Cellpose runs first (on each acquired round), then HCR-HCR registration, then
-    # the labels are aligned into the HCR01 frame for matching, then intensities are
-    # measured on the acquired rounds.
-    sg.run_cellpose(full_manifest)
-    rf.register_rounds(full_manifest)
-    rf.align_masks_to_reference(full_manifest)
-    if not full_manifest['check_alignment']:
-        sg.extract_probe_intensity(full_manifest)
+    # Publish the reference HCR volume up front. It is the acquired stack verbatim,
+    # so it costs a file copy, and it is one of the two images BigWarp opens.
+    rf.publish_reference_round(full_manifest)
 
     if args.only_hcr:
+        # HCR-only has no cross-modal landmark step, so nothing is gained by
+        # deferring segmentation here -- keep the original order.
+        sg.run_cellpose(full_manifest)
+        rf.register_rounds(full_manifest)
+        rf.align_masks_to_reference(full_manifest)
+        sg.extract_probe_intensity(full_manifest)
+
         # For HCR-only mode, just do align_masks and merge
         sg.align_masks(full_manifest, session, only_hcr=True, reference_plane=None)
         # Hybrid HCR↔HCR matcher (best-plane IoU overlap + soma repair); augments
@@ -76,15 +77,35 @@ def main(args = None):
         # First plane is the reference (used for HCR alignment and landmarks)
         reference_plane = all_planes[0]
 
-        # Process 2P data for each plane. Cellpose runs eagerly per plane; the
-        # verification prompt is consolidated into a single Enter press after
-        # the loop so the user doesn't get prompted between every plane.
+        # --- Prep: mode-dispatched, no segmentation. Produces the 2P images the
+        # landmark step opens (stitching for sbx, a copy + rotate for tiff).
+        for plane in all_planes:
+            session['functional_plane'] = [plane]
+            prepare_plane(full_manifest, session, has_hires)
+
+        # --- Landmarks: the manual step runs before any cellpose. BigWarp works on
+        # the 2P mean (or stitched hi-res) against the acquired HCR volume, neither
+        # of which is segmented, so making the user sit through cellpose first only
+        # delayed the point where a bad alignment becomes visible.
+        rf.ensure_twop_to_hcr_landmarks(
+            full_manifest, has_hires, int(reference_plane),
+            automation_enabled=(automation['twop_to_hcr'] == 'auto'))
+
+        # --- Segmentation. 2P cellpose reads the un-rotated mean image written
+        # during prep, so running it here segments exactly what it did before.
         cellpose_seg_files = []
         for plane in all_planes:
             session['functional_plane'] = [plane]
-            seg_file = process_plane(full_manifest, session, has_hires)
-            cellpose_seg_files.append((plane, seg_file))
+            cellpose_seg_files.append((plane, im.load_functional_masks(full_manifest, session)))
         sg.verify_2p_cellpose_segmentations(cellpose_seg_files)
+
+        # HCR segmentation, then HCR-HCR registration, then the labels are aligned
+        # into the HCR01 frame for matching, then intensities on the acquired rounds.
+        sg.run_cellpose(full_manifest)
+        rf.register_rounds(full_manifest)
+        rf.align_masks_to_reference(full_manifest)
+        if not full_manifest['check_alignment']:
+            sg.extract_probe_intensity(full_manifest)
 
         # Now do low-res to high-res registration for ALL planes at once
         # Method depends on automation config: 'landmarks' (default) or 'auto' (SIFT-based)
@@ -159,8 +180,13 @@ def main(args = None):
         rprint('='*80)
 
 
-def process_plane(full_manifest, session, has_hires):
-    """Process 2P data for a single plane (no HCR processing - that's done once in main).
+def prepare_plane(full_manifest, session, has_hires):
+    """Prepare the 2P images for a single plane, without segmenting anything.
+
+    Everything here is cheap and mode-dispatched, and it is all the landmark step
+    needs: tiff mode copies and rotates the user's mean image, suite2p pulls meanImg
+    out of ops.npy, sbx runs the tile pipeline. Segmentation is a separate call
+    (importers.load_functional_masks) so the manual BigWarp work can happen first.
 
     Functional lowres mean extraction (driven by input_format) and hires tile
     stitching (driven by has_hires) are orthogonal: any input_format can opt
@@ -168,7 +194,7 @@ def process_plane(full_manifest, session, has_hires):
     """
     plane = session['functional_plane'][0]
     input_format = fc._get_input_format(session)
-    rprint(f"\n[bold green]Processing 2P plane {plane}[/bold green]")
+    rprint(f"\n[bold green]Preparing 2P plane {plane}[/bold green]")
 
     # 1. Hires tile stitching first (sbx + suite2p modes). Running stitching
     # ahead of the lowres rotation prompt means the user gets a 2-channel
@@ -186,10 +212,6 @@ def process_plane(full_manifest, session, has_hires):
     # Dispatch lives in src/importers.py (behavior-identical across formats).
     im.load_functional_mean(full_manifest, session)
 
-    # 2P segmentation → seg.npy path (collected across planes; verified once after
-    # the loop). Source is 'compute' (cellpose, default) or 'accept' (rasterize the
-    # user's Suite2p ROIs); dispatch lives in src/importers.py.
-    return im.load_functional_masks(full_manifest, session)
 
 if __name__ == "__main__":
 
