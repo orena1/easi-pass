@@ -428,25 +428,24 @@ def stitch_tiles_and_rotate(full_manifest: dict, session: dict):
     if not any_rotated_exists:
         reference_HCR_round = verify_rounds(full_manifest)[1]['image_path']
 
+        # Same wording as functional._rotate_plane's prompt -- exactly one of the two
+        # fires per mouse (stitching runs first in sbx mode, so this one pre-empts it),
+        # and both audiences should get the same guidance. Flips must be settled here
+        # because BigWarp cannot mirror; rotation is carried by the landmarks.
         print('')
         print('=' * 70)
-        print(f'  ROTATION SETUP — {mouse_name} (hi-res stitched)')
+        print(f'  ORIENTATION — {mouse_name} plane {plane} (hi-res stitched)')
         print('=' * 70)
-        print(f'  No rotated image found for plane {plane}.')
-        print(f'  Before applying rotation, check your unrotated hi-res stitched image:')
-        print(f'')
-        print(f'    {stitched_file}')
-        print(f'')
-        print(f'  Compare it to the HCR reference round:')
-        print(f'')
-        print(f'    {reference_HCR_round}')
-        print(f'')
-        print(f'  Then update rotation_2p_to_HCR in your manifest:')
+        print(f'    2P:   {stitched_file}')
+        print(f'    HCR:  {reference_HCR_round}')
+        print('')
+        print('  Check the 2P and HCR images. If required, insert any horizontal')
+        print('  ("fliplr": true) or vertical ("flipud": true) flips into:')
         print(f'    {manifest_path}')
-        print(f'')
-        print(f'  Set "rotation" (degrees), "fliplr" (true/false), "flipud" (true/false)')
+        print('')
+        print('  Rotation is handled during landmarking - you do not need to set it here.')
         print('=' * 70)
-        input('  Press Enter after updating the manifest...\n')
+        input('  Press Enter when done > ')
 
     # Always re-read manifest from disk before applying rotation so subsequent
     # planes pick up edits the user made during plane 0's prompt.
