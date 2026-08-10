@@ -82,6 +82,20 @@ python master_pipeline.py --manifest examples/your_manifest.hjson --tiff_only
 python master_pipeline.py --manifest examples/your_manifest.hjson --only_hcr
 ```
 
+Cross-modal alignment is the step most likely to need another attempt — it depends on your
+seed landmarks, the functional segmentation, and whether the recovered tissue actually
+contains the imaged field. Add `--check_alignment` to settle that first:
+
+```bash
+python master_pipeline.py --manifest examples/your_manifest.hjson --tiff_only --check_alignment
+```
+
+This segments the reference FISH round only, registers and matches the functional planes to
+it, reports the match rate, and stops — so the later rounds need not even be imaged yet.
+Review the overlays in `OUTPUT/2P/registered/QualityCheck/`, then re-run the same command
+without the flag to segment the remaining rounds and build the output tables. Everything the
+check produced is reused.
+
 ## What it does
 
 ```

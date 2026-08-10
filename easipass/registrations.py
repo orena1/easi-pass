@@ -103,10 +103,12 @@ def _resolve_hcr_path(expected_path: Path) -> Path:
     return expected_path
 
 
-def HCR_confocal_imaging(manifest, only_paths=False):
+def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
     """
     print instructions on how to register the HCR data round to round
     only_paths: if True, return only the paths to the files and not registration instructions
+    require_all_rounds: if False, only the reference round has to be on disk; the later
+    rounds may still be at the bench
     """
 
     mov_rounds = []
@@ -121,12 +123,18 @@ def HCR_confocal_imaging(manifest, only_paths=False):
         missing_files = []
         if not reference_round.exists():
             missing_files.append(f"Reference: {reference_round.name}")
-        for i in mov_rounds:
-            if not i.exists():
-                missing_files.append(f"Round: {i.name}")
+        if require_all_rounds:
+            for i in mov_rounds:
+                if not i.exists():
+                    missing_files.append(f"Round: {i.name}")
 
         if not missing_files:
-            rprint("[green]All HCR round files found[/green]")
+            pending = [i for i in mov_rounds if not i.exists()]
+            if pending:
+                rprint(f"[green]Reference round found[/green] "
+                       f"[dim]({len(pending)} later round(s) not yet acquired)[/dim]")
+            else:
+                rprint("[green]All HCR round files found[/green]")
             break
 
         rprint(f"\n[bold yellow]Missing HCR round files:[/bold yellow]")
@@ -233,7 +241,8 @@ def verify_rounds(full_manifest, parse_registered = False, print_rounds = False,
     manifest = full_manifest['data']
 
     # verify that all rounds exists.
-    reference_round_path, mov_rounds_path = HCR_confocal_imaging(manifest, only_paths=True)
+    reference_round_path, mov_rounds_path = HCR_confocal_imaging(
+        manifest, only_paths=True, require_all_rounds=not full_manifest.get('check_alignment'))
     reference_round_number = manifest['HCR_confocal_imaging']['reference_round']
     if print_rounds: print("\nRounds available:")
 
@@ -250,7 +259,7 @@ def verify_rounds(full_manifest, parse_registered = False, print_rounds = False,
             reference_round['image_path'] = reference_round_path
     
     ready_to_apply = []
-    if parse_registered:
+    if parse_registered and not full_manifest.get('check_alignment'):
         selected_registrations = parse_json(full_manifest['manifest_path'])['params']
         if 'HCR_selected_registrations' not in selected_registrations:
             return round_to_rounds, reference_round, ready_to_apply
@@ -275,14 +284,20 @@ def register_rounds(full_manifest):
     manifest = full_manifest['data']
     round_to_rounds, reference_round, ready_to_apply = verify_rounds(full_manifest)
 
-    # If only one round (reference), nothing to register — just copy reference and return
+    # The 2P->HCR step reads the reference round from full_registered_stacks, so publish it
+    # before any round-to-round work — which may be skipped or deferred entirely.
+    reference_round_full_stack_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
+    if not reference_round_full_stack_path.exists():
+        reference_round_full_stack_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(reference_round['image_path'], reference_round_full_stack_path)
+        rprint(f"[green]✓ Reference round HCR{reference_round['round']} ready in full_registered_stacks[/green]")
+
+    if full_manifest.get('check_alignment'):
+        rprint("\n[bold cyan]Round-to-round registration deferred until the alignment check passes[/bold cyan]")
+        return
+
     if len(round_to_rounds) == 0:
         rprint("\n[bold cyan]Only one HCR round — skipping round-to-round registration[/bold cyan]")
-        reference_round_full_stack_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
-        reference_round_full_stack_path.parent.mkdir(parents=True, exist_ok=True)
-        if not reference_round_full_stack_path.exists():
-            shutil.copyfile(reference_round['image_path'], reference_round_full_stack_path)
-            rprint(f"[green]✓ Reference round HCR{reference_round['round']} copied to full_registered_stacks[/green]")
         return
 
     # Clean header
@@ -290,14 +305,6 @@ def register_rounds(full_manifest):
     rprint("[bold green] HCR Rounds Registrations[bold green]")
     rprint("="*80)
     rprint(f"Found {len(manifest['HCR_confocal_imaging']['rounds'])} HCR rounds in manifest")
-
-    # Ensure reference round is copied in case user has only Rounds = 1
-    reference_round_full_stack_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
-    if not reference_round_full_stack_path.exists():
-        reference_round_full_stack_path.parent.mkdir(parents=True, exist_ok=True)
-        rprint(f"[yellow]Copying reference round {reference_round['round']} to full_registered_stacks[/yellow]")
-        shutil.copyfile(reference_round['image_path'], reference_round_full_stack_path)
-        rprint(f"[green]✓ Reference round HCR{reference_round['round']} ready in full_registered_stacks[/green]")
 
     # Choose method. Centroid (in-pipeline compute + review) when the manifest's
     # HCR_to_HCR_registration has a centroid global+local block; otherwise fall back to the

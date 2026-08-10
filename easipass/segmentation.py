@@ -255,7 +255,10 @@ def run_cellpose(full_manifest):
         print_rounds=False, print_registered=False, func='cellpose')
 
     cellpose_channel_index = params['HCR_cellpose']['cellpose_channel']
-    all_rounds = list(round_to_rounds.keys()) + [reference_round['round']]
+    # The alignment check only needs the reference round; the rest are segmented on the
+    # full run, alongside the round-to-round registration that consumes them.
+    mov_rounds = [] if full_manifest.get('check_alignment') else list(round_to_rounds.keys())
+    all_rounds = mov_rounds + [reference_round['round']]
 
     # Which rounds still need segmenting
     skipped = []
@@ -1236,7 +1239,7 @@ def align_masks(full_manifest: dict,
         rprint("[dim]Skipping 2P masks alignment (HCR-only mode)[/dim]")
         return
 
-    if reference_plane is None:
+    if reference_plane is None and register_rounds:
         rprint("\n" + "="*80)
         rprint("[bold green] HCR Rounds Registrations COMPLETE[/bold green]")
         rprint("="*80 + "\n")

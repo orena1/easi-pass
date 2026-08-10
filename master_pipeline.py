@@ -22,12 +22,15 @@ def main(args = None):
 
     # Parse the manifest file
     full_manifest = mt.main_pipeline_manifest(args.manifest)
+    full_manifest['check_alignment'] = getattr(args, 'check_alignment', False)
     specs, has_hires = mt.verify_manifest(full_manifest, args)
 
     if getattr(args, 'tiff_only', False):
         rprint("[bold cyan]in vivo 2P -> ex vivo volume alignment[/bold cyan]")
     elif args.only_hcr:
         rprint("[bold cyan]HCR rounds + segmentation[/bold cyan]")
+    if full_manifest['check_alignment']:
+        rprint("[bold cyan]Alignment check: reference HCR round only, stopping after 2P-HCR matching[/bold cyan]")
 
     # Get automation config (defaults to 'manual' if not specified)
     automation = mt.get_automation_config(full_manifest.get('params', {}))
@@ -41,7 +44,8 @@ def main(args = None):
     sg.run_cellpose(full_manifest)
     rf.register_rounds(full_manifest)
     rf.align_masks_to_reference(full_manifest)
-    sg.extract_probe_intensity(full_manifest)
+    if not full_manifest['check_alignment']:
+        sg.extract_probe_intensity(full_manifest)
 
     if args.only_hcr:
         # For HCR-only mode, just do align_masks and merge
@@ -137,12 +141,21 @@ def main(args = None):
             # None), which runs first, so populate them once here; idempotent.
             if plane_reference is None:
                 sg.align_somaprint_hcr(full_manifest, session, only_hcr=args.only_hcr)
-            sg.merge_masks(full_manifest, session, only_hcr=args.only_hcr)
+            if not full_manifest['check_alignment']:
+                sg.merge_masks(full_manifest, session, only_hcr=args.only_hcr)
 
-        sg.print_match_summary(full_manifest, all_planes)
+        if not full_manifest['check_alignment']:
+            sg.print_match_summary(full_manifest, all_planes)
 
         rprint('\n' + '='*80)
-        rprint(f"[bold green]Pipeline completed successfully for {full_manifest['data']['mouse_name']}![/bold green]")
+        if full_manifest['check_alignment']:
+            rprint(f"[bold green]Alignment check complete for {full_manifest['data']['mouse_name']}[/bold green]")
+            rprint(f"Review the overlays in "
+                   f"[yellow]{mt.output_root(full_manifest) / '2P' / 'registered' / 'QualityCheck'}[/yellow]")
+            rprint(f"To finish the remaining rounds and build the output tables, re-run without "
+                   f"[cyan]--check_alignment[/cyan]")
+        else:
+            rprint(f"[bold green]Pipeline completed successfully for {full_manifest['data']['mouse_name']}![/bold green]")
         rprint('='*80)
 
 
@@ -187,8 +200,13 @@ if __name__ == "__main__":
     mode.add_argument('--tiff_only', action='store_true',
                       help='Align a pre-processed 2P mean image (TIFF) to an ex vivo volume. '
                            'See examples/demo_tiff_minimal.hjson.')
+    parser.add_argument('--check_alignment', action='store_true',
+                        help='Stop after registering and matching 2P to the reference HCR round. '
+                             'Later rounds need not be acquired yet; re-run without the flag to finish.')
 
     args = parser.parse_args()
+    if args.check_alignment and args.only_hcr:
+        parser.error('--check_alignment aligns 2P to HCR, which --only_hcr excludes')
     #args = {'manifest': 'examples/CIM132.hjson'}
     main(args)
     
