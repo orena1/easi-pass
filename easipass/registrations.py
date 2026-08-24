@@ -9,11 +9,11 @@ from pathlib import Path
 
 try:
     from .meta import (parse_json, get_hcr_to_hcr_registration_config, get_rotation_config, rprint, track,
-                       get_round_folder_name)  # Relative import (for running as part of a package)
+                       get_round_folder_name, flush_input)  # Relative import (for running as part of a package)
     from . import automation as auto
 except ImportError:
     from meta import (parse_json, get_hcr_to_hcr_registration_config, get_rotation_config, rprint, track,
-                      get_round_folder_name)  # Absolute import (for running in Jupyter Notebook)
+                      get_round_folder_name, flush_input)  # Absolute import (for running in Jupyter Notebook)
     import automation as auto
 
 try:
@@ -456,6 +456,7 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
         rprint("  Open the overlay images above. Press [green]Enter[/green] to accept the "
                "suggested registration.")
         rprint(f"  Otherwise, enter a row # ({rows}) to override:")
+        flush_input()  # drop Enters typed during the silent deform above, or this won't stop
         chosen_cand = _resolve_candidate(input().strip(), cands)
         chosen[str(rnd)] = chosen_cand['tag']
         rprint(f"  [green]selected[/green] HCR{rnd}: {chosen_cand['tag']}")
@@ -486,6 +487,7 @@ def _choose_global_interactive(rnd, ref, gtable, sug):
     rprint("      Open the overlay images above. Press [green]Enter[/green] to accept the "
            "suggested registration.")
     rprint(f"      Otherwise, enter a row # ({rows}) to override:")
+    flush_input()      # drop Enters typed during the silent deform above, or this won't stop
     return _resolve_global(input().strip(), gtable, sug)
 
 

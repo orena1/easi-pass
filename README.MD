@@ -78,7 +78,23 @@ let you check intermediate output; `demo/README.md` gives the answers.
    [`param_example.hjson`](examples/param_example.hjson) documents every tunable option in
    `params`. It is a reference to copy settings out of, not a starting point — it has no
    `data` section.
-2. Arrange your data as in [Folder structure](#folder-structure).
+2. Set `base_path` and `mouse_name` at the top of your manifest, then put your files here.
+   These are the only inputs; everything under `OUTPUT/` is created for you.
+
+   ```
+   {base_path}/{mouse_name}/
+   ├── 2P/
+   │   ├── plane_0.tiff               your functional mean image, one per plane
+   │   └── plane_0_hires.tiff         optional, and must already be stitched
+   └── HCR/
+       ├── {mouse_name}_HCR01.tiff    reference round
+       └── {mouse_name}_HCR02.tiff    any further rounds
+   ```
+
+   The numbers have to line up: `{N}` in `plane_{N}.tiff` matches an entry in
+   `functional_planes`, and `{R}` in `_HCR{R}.tiff` matches a `round` value. `.tif` and
+   `.tiff` both work, and case is ignored.
+
 3. Run:
 
 ```bash
@@ -244,55 +260,64 @@ The image must already be stitched.
 > already-stitched image instead. Generalizing it mainly needs an agreed tile-input format
 > (per-tile files plus a nominal grid position); that is an open contribution we'd welcome.
 
-## Folder structure
+## What the pipeline writes
+
+Everything lands under `{base_path}/{mouse_name}/OUTPUT/`, alongside your inputs:
 
 ```
-{base_path}/
-└── {mouse_name}/
-    ├── 2P/
-    │   ├── plane_0.tiff           mean image, low-res
-    │   ├── plane_0_hires.tiff     optional stitched hi-res structural image
-    │   └── ...
-    ├── HCR/
-    │   ├── {mouse}_HCR01.tiff     reference round
-    │   ├── {mouse}_HCR02.tiff     additional rounds
-    │   └── ...
-    └── OUTPUT/                    created by the pipeline
-        ├── HCR/
-        │   ├── full_registered_stacks/
-        │   ├── cellpose/
-        │   └── extract_intensities/
-        ├── 2P/
-        │   ├── cellpose/
-        │   └── registered/
-        └── MERGED/
-            ├── aligned_masks/
-            └── aligned_extracted_features/   <- final per-cell tables
+OUTPUT/
+├── HCR/
+│   ├── full_registered_stacks/   rounds warped into the reference frame
+│   ├── cellpose/                 3D FISH masks
+│   └── extract_intensities/      per-cell fluorescence per channel
+├── 2P/
+│   ├── cellpose/                 2D functional masks
+│   └── registered/               landmarks, transforms, QC overlays
+└── MERGED/
+    ├── aligned_masks/            per-cell match tables
+    └── aligned_extracted_features/   final tables, matches joined to genes
 ```
 
-## Expected noise on startup
-
-Suite2p prints `pynwb not installed, save_nwb, read_nwb, and nwb_to_binary will not work`
-every time it is imported. NWB is a file format EASI-PASS never touches; nothing is missing
-and there is nothing to install.
+The two you will actually open are `MERGED/aligned_masks/` for the matches and
+`2P/registered/QualityCheck/` for the overlays that tell you whether alignment worked.
 
 ## Re-running
 
-The pipeline skips a step when its output already exists. Delete a step's output files to
-re-run just that step, or the whole `OUTPUT/` folder for a clean run.
+The pipeline skips a step when its output already exists, so an interrupted run resumes
+where it stopped. Delete a step's output files to redo just that step, or the whole
+`OUTPUT/` folder for a clean run.
+
+## Troubleshooting
+
+**`pynwb not installed ...`** — printed by Suite2p on every import. NWB is a file format
+EASI-PASS never touches. Nothing is missing.
+
+**`could not start: No module named 'registrations'`** — an internal module name, so this is
+never the real cause. The startup message names what is actually wrong; the usual answer is
+that the environment is not active (`conda activate easipass`).
+
+**Alignment looks wrong** — see [docs/landmarks.md](docs/landmarks.md), which covers the
+common failure modes and what each one points to.
 
 ## Source layout
 
+Where to look first, by what you are trying to change:
+
 | File | Purpose |
 |---|---|
-| `master_pipeline.py` | Orchestrator and CLI |
+| `master_pipeline.py` | Orchestrator and CLI — the order every step runs in |
 | `easipass/meta.py` | Manifest parsing and validation |
-| `easipass/segmentation.py` | Cellpose segmentation, mask alignment, merging |
+| `easipass/importers.py` | Dispatch on `input_format` (tiff / suite2p / sbx) |
+| `easipass/functional.py` | Reads the functional side and applies the coarse rotation |
+| `easipass/segmentation.py` | Cellpose segmentation, mask matching, merged tables |
 | `easipass/registrations.py` | Registration orchestration |
 | `easipass/registrations_utils.py` | Cross-modal registration algorithms |
 | `easipass/hcr_centroid_registration.py` | Centroid-seeded round-to-round registration |
 | `easipass/somaprint.py` | Geometric cross-modal cell matcher |
 | `easipass/somaprint_hcr.py` | Geometric round-to-round cell matcher |
+
+The rest of `easipass/` is supporting code: tile stitching, the automation checkpoints, the
+BigStream wrappers, and analysis helpers.
 
 ## Citation
 

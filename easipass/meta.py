@@ -38,6 +38,36 @@ except ImportError:
                 print(f"  Please enter one of: {', '.join(choices)}")
 
 
+def flush_input():
+    """Discard anything already typed at the terminal. Call immediately before a blocking
+    review prompt.
+
+    Why this is needed: the stages between two review prompts are long and silent (one
+    piecewise deform runs ~15 min printing nothing), which invites people to tap Enter to
+    check the run is still alive. Those newlines sit in the tty buffer and are swallowed
+    instantly by the NEXT input(), so the following prompt appears to never happen -- it
+    returns '' and silently takes the default. Flushing first means every review prompt
+    actually stops and waits for a fresh answer.
+
+    No-op when stdin is not a tty, so piped/scripted runs keep their supplied input.
+    """
+    try:
+        if not sys.stdin.isatty():
+            return
+    except Exception:
+        return                              # detached/odd stdin: nothing safe to flush
+    try:
+        import termios                      # POSIX -- the pipeline runs on Linux
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        try:
+            import msvcrt                   # Windows
+            while msvcrt.kbhit():
+                msvcrt.getwch()
+        except Exception:
+            pass                            # can't flush here; the prompt still works
+
+
 def parse_json(json_file):
     """
     Parse a json/hjson manifest. Normalizes base_path slashes so the same

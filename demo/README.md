@@ -13,7 +13,7 @@ movie, so there are no activity traces — just cross-modal alignment + the mole
 ```
 demo/
 ├── README.md              ← you are here
-├── JS078_demo.hjson       ← the manifest (edit base_path, then run)
+├── JS078_demo.hjson       ← the manifest; nothing to edit
 ├── make_demo_data.py      ← how the demo subset was assembled from full JS078 (reproducible)
 ├── fetch_demo_data.py     ← downloads the imaging data from the GitHub release
 ├── demo_pre_run/          ← FRESH: the data you run the pipeline on (~350 MB download)
