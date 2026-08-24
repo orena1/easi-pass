@@ -101,55 +101,6 @@ def get_magnification_from_sbx(sbx_path):
     return actual_magnification
 
 
-def _rational_to_float(val):
-    # tifffile may give (num, den) tuple-like or a Rational object
-    try:
-        return float(val[0]) / float(val[1])
-    except Exception:
-        return float(val)
-
-def read_spacing_xyz_from_tiff(path):
-    """
-    Returns (sx, sy, sz, unit) where s* are in 'unit' per pixel (e.g. micrometer / pixel).
-    If metadata is missing, falls back to 1.0.
-    """
-    sx = sy = sz = 1.0
-    unit = None
-
-    with TiffFile(path) as tif:
-        page = tif.pages[0]
-
-        # --- 1) ImageJ metadata (what Fiji commonly uses)
-        ij = tif.imagej_metadata or {}
-        # ImageJ 'unit' (e.g. 'micron', 'um')
-        unit = ij.get("unit", None)
-
-        # ImageJ 'spacing' is typically Z step in the same unit
-        # (often present for stacks)
-        if "spacing" in ij and ij["spacing"] is not None:
-            try:
-                sz = float(ij["spacing"])
-            except Exception:
-                pass
-
-        # --- 2) TIFF resolution tags: usually pixels per unit
-        # Fiji screenshot: "Resolution: 0.748 pixels per micron"
-        # so micron_per_pixel = 1 / 0.748 = 1.3369
-        tags = page.tags
-
-        xres = tags.get("XResolution")
-        yres = tags.get("YResolution")
-        if xres and yres:
-            x_ppu = _rational_to_float(xres.value)  # pixels per unit
-            y_ppu = _rational_to_float(yres.value)
-            if x_ppu and x_ppu > 0:
-                sx = 1.0 / x_ppu
-            if y_ppu and y_ppu > 0:
-                sy = 1.0 / y_ppu
-
-    return sx, sy, sz, unit
-
-
 def tps_warp_2p_to_hcr(twop_2d, landmarks_df, hcr_shape, order=0, downsample=10):
     """Apply TPS warp to transform 2P image into HCR coordinate space.
 
@@ -474,7 +425,8 @@ def read_tiff_resolution(tiff_path):
         return None
 
 
-def resolve_hcr_resolution(tiff_path, manifest_resolution=None, tolerance=0.05):
+def resolve_hcr_resolution(tiff_path, manifest_resolution=None, tolerance=0.05,
+                           require_metadata=False):
     """Pick final HCR resolution. TIFF metadata is the source of truth whenever it is
     readable; the manifest `resolution` is only a fallback for when metadata is missing.
 
@@ -492,6 +444,21 @@ def resolve_hcr_resolution(tiff_path, manifest_resolution=None, tolerance=0.05):
             f"and no `resolution` set in manifest's rounds entry.")
 
     if tiff_res is None:
+        if require_metadata:
+            # BigWarp exports landmark coordinates in whatever units the volume
+            # declares. An uncalibrated volume therefore yields pixel
+            # coordinates, which the landmark path then divides by a micron
+            # resolution -- every landmark lands at the wrong scale, and nothing
+            # downstream can detect it. A manifest value cannot rescue this,
+            # because it does not tell us what units BigWarp actually wrote.
+            raise ValueError(
+                f"HCR landmark scaling requires micron calibration on the volume, but "
+                f"{name} carries no readable ImageJ unit/spacing metadata.\n"
+                f"  {tiff_path}\n"
+                "Set the calibration (Fiji: Image > Properties, unit=micron with the "
+                "correct pixel width/height/depth), re-export the landmarks, and re-run. "
+                "A manifest `resolution` cannot substitute here: it says how big a voxel "
+                "is, not which units the landmark file is in.")
         print(f"  [WARN] HCR resolution: TIFF metadata unreadable at {name}; "
               f"using manifest {manifest_resolution} unverified.")
         return list(manifest_resolution)
@@ -1908,11 +1875,19 @@ def compute_adaptive_matching_params(cell_df, tile_size, stage_idx=0,
 
     For stage 0 (first cascade stage): uses tile-proportional defaults
       - search_xy = tile_size * tile_ratio
-      - search_z  = max(search_z_min, round(tile_size * z_tile_ratio))
+      - search_z  = max(search_z_min, round(tile_size * z_tile_ratio)) -- NOTE: unlike search_xy,
+        this has no upper cap; for the shipped [300,100,50] cascade the search_z_min floor of 2
+        dominates almost entirely (values come out 3, 2, 2), so z_tile_ratio barely does
+        anything in practice. Deliberately left as-is: it is not causing any known
+        problem, and any actual formula/cap change needs validation against a real
+        mouse, and against the cascade replay that imports this function directly to
+        reproduce the published numbers, before being safe to adopt.
     For subsequent stages: residual-driven from post-correction re-match
       - search_xy = ceil(P95(|dxy|) * multiplier), capped at tile_size*tile_ratio and search_xy_max
+        (search_xy_max is a config-safety ceiling for large custom cascade_stages tiles -- for
+        the shipped [300,100,50] cascade, tile_size*tile_ratio is always smaller and wins first)
       - search_z  = ceil(P95(|dz|)  * multiplier), capped at search_z_max
-        (falls back to stage-0 proportional value if cell_df has no 'dz' column)
+        (falls back to the stage-0 proportional value above if cell_df has no 'dz' column)
 
     Returns (patch_radius, search_xy, search_z).
     """
@@ -1928,7 +1903,9 @@ def compute_adaptive_matching_params(cell_df, tile_size, stage_idx=0,
 
     # XY search: enough to capture residuals with margin
     search_xy = max(search_xy_min, int(np.ceil(p_xy * multiplier)))
-    # Cap at fraction of tile size and absolute max
+    # Cap at fraction of tile size, and at an absolute safety ceiling (search_xy_max) that
+    # only ever binds for custom cascade_stages with much larger late-stage tiles -- for the
+    # shipped [300,100,50] cascade, tile_size*tile_ratio (40px/20px) is always smaller and wins.
     search_xy = min(search_xy, int(tile_size * tile_ratio), search_xy_max)
     # Patch must be at least patch_ratio * search
     patch_radius = max(search_xy, int(search_xy * patch_ratio))

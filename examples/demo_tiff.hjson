@@ -1,15 +1,30 @@
 {
-    // EASI-PASS — FISH rounds only, no functional data. Copy, edit the paths, run:
+    // EASI-PASS — start here. Copy, edit the paths, run:
     //   python master_pipeline.py --manifest your_file.hjson
     //
-    // Inputs:  {base_path}/{mouse_name}/HCR/{mouse_name}_HCR{R}.tiff   (one per round)
+    // Inputs:  {base_path}/{mouse_name}/2P/plane_{N}.tiff
+    //          {base_path}/{mouse_name}/HCR/{mouse_name}_HCR{R}.tiff   (one per round)
     //
-    // Rounds are registered to the reference, segmented, and matched to each other.
-    // With no two_photon_imaging section, --only_hcr is inferred.
+    // Add --check_alignment to stop after matching 2P to the reference round;
+    // later rounds need not exist yet. Re-run without it to finish.
+    //
+    // Hi-res bridge: drop a stitched plane_{N}_hires.tiff next to plane_{N}.tiff.
+    // Single round: leave one entry in `rounds`. Neither needs a manifest change.
+    //
+    // All tunable parameters are documented in param_example.hjson.
 
     data: {
         base_path: "/mnt/nasquatch/data/2p/YOUR_LAB/EASI_FISH/pipeline"
         mouse_name: "MOUSE001"
+
+        two_photon_imaging: {
+            sessions: [
+                {
+                    input_format: "tiff"
+                    functional_planes: ["0"]
+                }
+            ]
+        }
 
         HCR_confocal_imaging: {
             rounds: [
@@ -23,13 +38,7 @@
                     channels: ["DAPI", "PROBE_C", "PROBE_D"]
                     resolution: [1.515, 1.515, 5.0]
                 }
-                {
-                    round: "03"
-                    channels: ["DAPI", "PROBE_E", "PROBE_F"]
-                    resolution: [1.515, 1.515, 5.0]
-                }
             ]
-
             reference_round: "01"
         }
     }
@@ -55,6 +64,13 @@
             }
         }
 
+        // Coarse 2P orientation relative to the FISH volume, applied before landmarks.
+        rotation_2p_to_HCR: { rotation: 0, fliplr: false, flipud: false }
+
+        twop_to_hcr_registration: {
+            cascade_stages: [300, 100, 50]   // local tile sizes, px
+        }
+
         // "cpsam" is cellpose-SAM, downloaded on first run. Or give a path to your own model.
         HCR_cellpose: {
             model_path: "cpsam"
@@ -63,6 +79,15 @@
             gpu: true
             flow_threshold: 0.5
             cellprob_threshold: -0.5
+        }
+
+        2p_cellpose: {
+            model_path: "cpsam"
+            cellpose_channel: 0
+            diameter: 7
+            gpu: true
+            flow_threshold: 0
+            cellprob_threshold: -1
         }
 
         intensity_extraction: {

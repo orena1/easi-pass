@@ -12,10 +12,9 @@ HCR{reference} frame:
     `2d_plane` soma adds matches in the slightly-misregistered patches that overlap
     alone can't reach.
 
-This is a faithful port of the validated dev library
-(figure_notebooks/figure_4_cortex/somaprint_tests/somaprint_hcr.py) plus the
-best-plane overlap stage-1 from phase0_validate_production_masks_JS082.py. The core
-matcher (SPParams/match/iterate_rounds/...) is byte-for-byte the dev code so the
+This is a faithful port of the validated dev library plus the best-plane overlap
+stage-1 validated on JS082. The core matcher (SPParams/match/iterate_rounds/...)
+is byte-for-byte the dev code so the
 production path reproduces the notebook numbers; only the pipeline entry point
 (`run_for_round`) and the manifest plumbing (`get_params`) are new here.
 

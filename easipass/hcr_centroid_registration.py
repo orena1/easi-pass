@@ -103,6 +103,14 @@ def get_centroid_config(params):
         return None, None, ds
     g = {**_GLOBAL_DEFAULTS, **(g_raw or {})}
     l = {**_LOCAL_DEFAULTS, **(l_raw or {})}
+    # 'centroid' is the only implemented method. An unrecognised value used to
+    # fall through to the legacy notebook path, whose error message says the
+    # global/local block is missing -- confusing when it is right there.
+    for name, cfg in (('global', g), ('local', l)):
+        if cfg.get('method', 'centroid') != 'centroid':
+            raise ValueError(
+                f"HCR_to_HCR_registration.{name}.method = {cfg['method']!r} is not implemented. "
+                "Remove the field; 'centroid' is the only option.")
     # normalise list-ish fields
     g['context_radius_um'] = _aslist(g['context_radius_um'])
     if l['blocksize'] and np.ndim(l['blocksize'][0]) == 0:   # single [Y,X,Z] -> wrap

@@ -11,8 +11,8 @@ needs the surrounding HCR image context, and several landmark cells sit near the
 tissue edge. An earlier version XY-cropped the volume to shave size; that halved
 alignment quality -- plane0 best-match median IoU dropped 0.38 -> 0.16 vs the
 uncropped production run, and the 2P->HCR overlay masks looked misaligned.
-Shipping the full volume restores production-quality alignment. The data lives on
-Zenodo (see fetch_demo_data.py), so the ~774 MB size is not a repo concern.
+Shipping the full volume restores production-quality alignment. The data is a release
+asset (see fetch_demo_data.py), so the ~774 MB size is not a repo concern.
 
 (A previous Z-crop attempt failed the same way, which is why full Z was already
 kept; the XY crop was the remaining offender. Everything is now shipped whole.)

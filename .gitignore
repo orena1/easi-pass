@@ -5,7 +5,7 @@ __pycache__/
 *.ipynb
 
 # Personal/IDE settings
-.vscode/settings.json
+.vscode/
 
 # Real experiment manifests (keep only demo*.hjson tracked)
 examples/*.hjson
@@ -56,9 +56,30 @@ easipass/processing_notebooks/HCR_rounds/twop_to_hcr_*_outputs/
 .rudfo9b6/
 .wtd5l0tx/
 
+# --- Local analysis / results trees (never published) ---
+# Unpublished figure notebooks + panels, pipeline run outputs, and scratch dumps.
+figure_notebooks/
+photobleach_analysis/
+OUTPUT/
+**/OUTPUT/
+_easipass_junk/
+easipass/processing_notebooks/segmentation_audit/
+easipass/processing_notebooks/HCR_rounds/_ablation_dumps/
+
+# Internal audit/planning docs. Only user-facing docs are tracked, by exception.
+docs/*.md
+!docs/landmarks.md
+
+# --- Internal-only files kept on disk but never published ---
+# Lab env dump; notebook import shim (stale module names + hardcoded personal
+# paths); scratch notes on the examples/ layout.
+gather_env_info.sh
+easipass/processing_notebooks/HCR_rounds/reg_imports.py
+examples/*.txt
+
 # Demo: ship the scaffold (manifest, scripts, README, golden CSV); the heavy
-# imaging data (demo_pre_run/ + demo_post_run/) is hosted on Zenodo and fetched
-# by fetch_demo_data.py
+# imaging data (demo_pre_run/ + demo_post_run/) is attached to the GitHub release
+# and fetched by fetch_demo_data.py
 demo/demo_pre_run/
 demo/demo_post_run/
 # Local test manifest with a concrete base_path (the shipped one keeps a placeholder)

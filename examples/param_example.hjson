@@ -1,29 +1,27 @@
 // ===== HCR round-to-round registration =====
-// When a `global` and `local` block are present (and both method:"centroid"), the pipeline
-// computes the registration IN-PROCESS using cellpose nucleus centroids (no notebook farming),
-// shows a ranked review, and on your selection WRITES HCR_selected_registrations below for you.
-// Omit the global/local blocks (or set either method:"blob") to fall back to the legacy
-// notebook scan workflow.
+// A `global` and `local` block are REQUIRED for multi-round manifests. With them the
+// pipeline computes the registration IN-PROCESS using cellpose nucleus centroids, shows a
+// ranked review, and on your selection WRITES HCR_selected_registrations below for you.
+// Omitting them falls back to a legacy notebook workflow that is not part of this release,
+// and the pipeline raises rather than silently dropping every non-reference round.
 HCR_to_HCR_registration:{
     "downsampling":[3, 3, 2]            // [x,y,z] downsample for the global (lowres) stage
 
     "global":{
-        "method":"centroid"            // "centroid" (in-pipeline) | "blob" (legacy notebook)
         "context_radius_um":[40, 60, 80]  // searched (downsampled, cheap); best auto-picked. ~60um is near-universal
         "match_threshold":0.3          // context-correlation cutoff for a centroid match
         "select_metric":"mi"           // pick best radius: "mi" (default) | "median_resid" | "above_chance" (all guarded vs worse-than-chance)
         // no rotation cap: the RANSAC affine is used as-is
     }
     "local":{
-        "method":"centroid"            // "centroid" | "blob"
         "blocksize":[[200,200,10]]     // fixed winner (cortex+PBN screen); add more here to search if tissue differs
         "overlap":0.5
         "context_radius":[12, 12, 2]   // block context window in VOXELS (current local style)
         // "context_radius_um":60       // OPT-IN: use a um-window for blocks instead (experiment)
         "match_threshold":0.3
         "max_spot_match_distance_um":60
-        "count_floor":8                // loosened spot-count floor for centroids (blob era was 100)
-        "match_floor":4                // loosened point-matches floor (blob era was 50)
+        "count_floor":8                // minimum centroids per block
+        "match_floor":4                // minimum point matches per block
         "adaptive_edges":true          // bounds-safe edge/thin-z context padding
     }
 }
@@ -50,9 +48,11 @@ twop_to_hcr_registration:{
     "erosion":2,                        // 2P mask shrink (px); 0 for cp4-SAM masks
     "erosion_hcr":0,                    // HCR mask shrink (px); try 1 if HCR cells bleed
     "z_range_global":[-15, 15],         // z-offset search range (slices); widen to [-25, 25] for large z offset
-    "xy_max_global":500,                // xy search range (px); raise to 600 if landmarks coarse
+    // "xy_max_global":100,             // xy search cap (px). Default 100. Tightened from 500 on
+                                        // 2026-06-02: healthy planes shift 1-51 px, while broken
+                                        // runs shifted 400-700 px onto a spurious dense cluster.
+                                        // Raise only if a good alignment is being rejected.
     "hull_margin":-100,                 // inward hull erosion (px, negative); less negative (-50) for poor landmark coverage
-    "flip_z":false,                     // true when HCR acquisition has inverted z-axis
     // Neighborhood-agreement term for each 2P->HCR match: the any-cell foreground
     // IoU in a window around the cell, REPORTED as twoP_neighborhood_iou in the
     // merged table alongside twoP_iou. It never drops matches — threshold it
@@ -60,13 +60,6 @@ twop_to_hcr_registration:{
     // spurious single-cell overlap in a partially-aligned region).
     "report_neighborhood_iou":true,     // set false to omit the column
     "neighborhood_window_px":50         // XY window side length (px)
-}
-
-// Measure cellpose + mRNA/neuropil on the un-warped HCR rounds, warping only the
-// DAPI labels into the HCR01 frame for matching (IDs preserved). Avoids the
-// per-channel warp and the signal loss it causes on sparse probes. Default off.
-HCR_native_extraction:{
-    "enabled":false
 }
 
 // HCR round-to-round cell matching: a two-stage hybrid that re-pairs cells across

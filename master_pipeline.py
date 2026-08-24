@@ -1,23 +1,109 @@
 import argparse
 from pathlib import Path
-from easipass import functional as fc
-from easipass import tiling as tl
-from easipass import registrations as rf
-from easipass import registrations_landmarks as rf_landmarks
-from easipass import meta as mt
-from easipass import segmentation as sg
-from easipass import importers as im
-from easipass.meta import rprint
+
+try:
+    from easipass import functional as fc
+    from easipass import tiling as tl
+    from easipass import registrations as rf
+    from easipass import registrations_landmarks as rf_landmarks
+    from easipass import meta as mt
+    from easipass import segmentation as sg
+    from easipass import importers as im
+    from easipass.meta import rprint
+except ImportError as exc:
+    # Each easipass module falls back to a flat import so it can also be used
+    # from a notebook. That fallback masks the real cause: a missing
+    # third-party package surfaces as "No module named 'registrations'" (or
+    # 'functional', or 'meta'), which are internal modules, not the problem.
+    raise SystemExit(
+        f"EASI-PASS could not import its modules: {exc}\n"
+        "\n"
+        "If the name above is an easipass module (registrations, functional, meta,\n"
+        "segmentation, tiling), it is misleading -- a dependency underneath is what\n"
+        "actually failed. Install the package and its dependencies with:\n"
+        "\n"
+        "    pip install -e .\n"
+        "\n"
+        "and check which dependency is missing with:\n"
+        "\n"
+        '    python -c "import zarr, sbxreader, suite2p, bigstream, SimpleITK, sklearn, numba"\n'
+    ) from exc
 
 # This is the main pipeline script that runs the entire pipeline
 
 # https://drive.google.com/file/d/1HZNh7aqJr-vTsLsSGlFmi11HuEvYlgZ-/view?usp=sharing
 
+def _parse_args(argv=None):
+    '''
+    Build the CLI and parse it. Kept separate from main() so the `easipass`
+    console-script entry point can parse its own arguments -- setuptools calls
+    main() with no arguments, which previously left args as None.
+    '''
+    parser = argparse.ArgumentParser(
+        prog='easipass',
+        description='EASI-PASS: 2-photon to HCR registration and mask matching pipeline.')
+    parser.add_argument('--manifest', required=True, help='Path to the pipeline manifest file e.g. examples/CIM132.hjson')
+    parser.add_argument('--only_hcr', action='store_true',
+                        help='FISH rounds + segmentation only; skip the functional side. '
+                             'Inferred automatically when the manifest has no two_photon_imaging '
+                             'section; pass it explicitly to skip the 2P half of a full manifest.')
+    parser.add_argument('--check_alignment', action='store_true',
+                        help='Stop after registering and matching 2P to the reference FISH round. '
+                             'Later rounds need not be acquired yet; re-run without the flag to finish.')
+    # How the functional side is read is a property of the data, so it lives in
+    # the manifest as input_format. Accepted silently so old commands still run.
+    parser.add_argument('--tiff_only', action='store_true', help=argparse.SUPPRESS)
+
+    args = parser.parse_args(argv)
+    if args.check_alignment and args.only_hcr:
+        parser.error('--check_alignment aligns 2P to FISH, which --only_hcr excludes')
+    if args.tiff_only:
+        rprint("[yellow]--tiff_only is no longer needed: set input_format: \"tiff\" in the "
+               "manifest session instead. Continuing with tiff.[/yellow]")
+    return args
+
+
+def _print_resolved_config(full_manifest, args, has_hires):
+    '''
+    Echo what the manifest and flags actually resolved to, before any work
+    starts. The mode is otherwise implicit: a manifest silently decides how the
+    functional side is read and whether a hi-res bridge was found, and both are
+    easy to get wrong in ways that only surface much later as a confusing
+    failure. Cheap to print, and it is the first thing to check in a bug report.
+    '''
+    data = full_manifest['data']
+    rounds = data['HCR_confocal_imaging']['rounds']
+    ref = data['HCR_confocal_imaging']['reference_round']
+
+    rprint("\n[bold]Resolved configuration[/bold]")
+    rprint(f"  sample          {data['mouse_name']}")
+    rprint(f"  base path       {data['base_path']}")
+
+    if args.only_hcr:
+        rprint("  functional      [dim]none (--only_hcr)[/dim]")
+    else:
+        session = data['two_photon_imaging']['sessions'][0]
+        planes = session.get('functional_planes', session.get('functional_plane', []))
+        fmt = session.get('input_format')
+        note = " [dim](forced by --tiff_only)[/dim]" if getattr(args, 'tiff_only', False) else ""
+        lab_only = " [yellow](in-lab ScanBox format)[/yellow]" if fmt == 'sbx' else ""
+        rprint(f"  functional      {fmt}{note}{lab_only}, {len(planes)} plane(s): {', '.join(map(str, planes))}")
+        rprint(f"  hi-res bridge   {'yes' if has_hires else 'no'}")
+
+    rprint(f"  FISH rounds     {len(rounds)} ({', '.join(str(r['round']) for r in rounds)}), reference {ref}")
+    if len(rounds) == 1:
+        rprint("                  [dim]single round: no round-to-round registration[/dim]")
+    rprint("")
+
+
 def main(args = None):
     '''
-    We can either start main with arguments or from command line 
+    We can either start main with arguments or from command line
     See README.md for more information
     '''
+    if args is None:
+        args = _parse_args()
+
     session = []
 
     # Parse the manifest file
@@ -25,12 +111,14 @@ def main(args = None):
     full_manifest['check_alignment'] = getattr(args, 'check_alignment', False)
     specs, has_hires = mt.verify_manifest(full_manifest, args)
 
-    if getattr(args, 'tiff_only', False):
+    if args.only_hcr:
+        rprint("[bold cyan]FISH rounds + segmentation[/bold cyan]")
+    else:
         rprint("[bold cyan]in vivo 2P -> ex vivo volume alignment[/bold cyan]")
-    elif args.only_hcr:
-        rprint("[bold cyan]HCR rounds + segmentation[/bold cyan]")
     if full_manifest['check_alignment']:
-        rprint("[bold cyan]Alignment check: reference HCR round only, stopping after 2P-HCR matching[/bold cyan]")
+        rprint("[bold cyan]Alignment check: reference FISH round only, stopping after 2P-FISH matching[/bold cyan]")
+
+    _print_resolved_config(full_manifest, args, has_hires)
 
     # Get automation config (defaults to 'manual' if not specified)
     automation = mt.get_automation_config(full_manifest.get('params', {}))
@@ -82,6 +170,13 @@ def main(args = None):
         for plane in all_planes:
             session['functional_plane'] = [plane]
             prepare_plane(full_manifest, session, has_hires)
+
+        # Prep may have written a rotation the user chose at the ORIENTATION
+        # prompt. functional.py re-reads the manifest from disk before rotating
+        # the image, but the mask-side rotation in registrations.py reads this
+        # in-memory copy, so without this refresh the landmark grid and the mask
+        # grid disagree by exactly the flip the user just asked for.
+        full_manifest['params'] = mt.parse_json(full_manifest['manifest_path'])['params']
 
         # --- Landmarks: the manual step runs before any cellpose. BigWarp works on
         # the 2P mean (or stitched hi-res) against the acquired HCR volume, neither
@@ -214,21 +309,5 @@ def prepare_plane(full_manifest, session, has_hires):
 
 
 if __name__ == "__main__":
+    main()
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--manifest', required=True, help='Path to the pipeline manifest file e.g. examples/CIM132.hjson')
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--only_hcr', action='store_true', help='HCR rounds + segmentation only; no 2P data')
-    mode.add_argument('--tiff_only', action='store_true',
-                      help='Align a pre-processed 2P mean image (TIFF) to an ex vivo volume. '
-                           'See examples/demo_tiff_minimal.hjson.')
-    parser.add_argument('--check_alignment', action='store_true',
-                        help='Stop after registering and matching 2P to the reference HCR round. '
-                             'Later rounds need not be acquired yet; re-run without the flag to finish.')
-
-    args = parser.parse_args()
-    if args.check_alignment and args.only_hcr:
-        parser.error('--check_alignment aligns 2P to HCR, which --only_hcr excludes')
-    #args = {'manifest': 'examples/CIM132.hjson'}
-    main(args)
-    

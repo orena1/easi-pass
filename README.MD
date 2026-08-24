@@ -32,7 +32,7 @@ Segmentation uses **Cellpose 4 (cellpose-SAM)**.
 ```bash
 conda env create -f environment.yml   # Python 3.12, PyTorch + CUDA
 conda activate easipass
-pip install -e ".[all]"               # the pipeline and its Python dependencies
+pip install -e .                      # the pipeline and its Python dependencies
 ```
 
 > **Faster install.** conda's classic solver can spend 10+ minutes on `environment.yml`.
@@ -40,54 +40,65 @@ pip install -e ".[all]"               # the pipeline and its Python dependencies
 > libmamba solver to cut that to seconds. Recent conda versions use libmamba by default.
 
 `environment.yml` covers only what must come from conda channels; everything else is
-declared in `pyproject.toml`. Install a subset instead of `[all]` if you don't need
-every stage:
+declared in `pyproject.toml`.
 
-| Command | Adds |
-|---|---|
-| `pip install -e "."` | Core pipeline |
-| `pip install -e ".[bigstream]"` | Deformable registration for multi-round FISH |
-| `pip install -e ".[notebooks]"` | Jupyter and interactive plotting |
-| `pip install -e ".[analysis]"` | Stats and ML for the analysis notebooks |
+`pip install -e .` covers every stage and mode. The extras are only for work beyond a
+pipeline run: `.[notebooks]` adds Jupyter and interactive plotting, `.[analysis]` adds stats
+and ML for the analysis notebooks, and `.[all]` adds both.
 
-> **BigStream fork:** multi-round FISH registration installs a pinned fork from git via
-> `[bigstream]`/`[all]`. To use a local checkout instead: `pip install -e /path/to/bigstream`.
+> **BigStream fork:** multi-round FISH registration installs a pinned fork from git. To use
+> a local checkout instead: `pip install -e /path/to/bigstream`.
+
+Cross-modal runs also need [Fiji](https://fiji.sc/)'s BigWarp for placing seed landmarks
+(Plugins > BigDataViewer > Big Warp). See [docs/landmarks.md](docs/landmarks.md).
 
 ## Start with the demo
 
-[`demo/`](demo/README.md) is a small, real, end-to-end example — one two-photon plane from
-mouse JS078 aligned to a 5-channel FISH volume, with the data on Zenodo and a reference
-result to check yourself against. It is the fastest way to confirm your install works and
-to see what goes in and what comes out.
+[`demo/`](demo/README.md) is a small, real, end-to-end example: one two-photon plane from
+mouse JS078 aligned to a 5-channel FISH volume, with a reference result to check yourself
+against. It is the fastest way to confirm your install works and to see what goes in and
+what comes out.
 
 ```bash
 cd demo
 python fetch_demo_data.py                      # downloads the imaging data
 # edit demo/JS078_demo.hjson: set base_path to demo/demo_pre_run
 cd ..
-python master_pipeline.py --manifest demo/JS078_demo.hjson --tiff_only
+python master_pipeline.py --manifest demo/JS078_demo.hjson
 ```
 
 ## Running your own data
 
-1. Copy [`examples/param_example.hjson`](examples/param_example.hjson) — every option, documented inline.
+1. Copy the template that matches what you have:
+
+   | Template | For |
+   |---|---|
+   | [`demo_tiff.hjson`](examples/demo_tiff.hjson) | **Start here.** You supply a 2P mean image per plane as `plane_{N}.tiff` |
+   | [`demo_suite2p.hjson`](examples/demo_suite2p.hjson) | Same, but point at your Suite2p folder and the mean image is pulled from `ops.npy` |
+   | [`demo_hcr_only.hjson`](examples/demo_hcr_only.hjson) | FISH rounds alone, no functional data |
+
+   A hi-res structural image and the single-round case both work without any manifest
+   change — see the notes at the top of `demo_tiff.hjson`.
+
+   [`param_example.hjson`](examples/param_example.hjson) documents every tunable option in
+   `params`. It is a reference to copy settings out of, not a starting point — it has no
+   `data` section.
 2. Arrange your data as in [Folder structure](#folder-structure).
 3. Run:
 
 ```bash
-# Cross-modal: functional mean image + FISH volumes
-python master_pipeline.py --manifest examples/your_manifest.hjson --tiff_only
-
-# Molecular-only: FISH rounds alone, no functional data
-python master_pipeline.py --manifest examples/your_manifest.hjson --only_hcr
+python master_pipeline.py --manifest examples/your_manifest.hjson
 ```
+
+A manifest with no `two_photon_imaging` section runs FISH rounds only; nothing extra to
+pass. Use `--only_hcr` when you want to skip the functional half of a manifest that has one.
 
 Cross-modal alignment is the step most likely to need another attempt — it depends on your
 seed landmarks, the functional segmentation, and whether the recovered tissue actually
 contains the imaged field. Add `--check_alignment` to settle that first:
 
 ```bash
-python master_pipeline.py --manifest examples/your_manifest.hjson --tiff_only --check_alignment
+python master_pipeline.py --manifest examples/your_manifest.hjson --check_alignment
 ```
 
 This segments the reference FISH round only, registers and matches the functional planes to
@@ -123,6 +134,13 @@ Output
 
 With `--only_hcr`, steps 4–7 are skipped and cells are matched across FISH rounds only.
 
+> **Round-to-round registration** uses cell centroids from the segmentation, not detected
+> fluorescent spots. If rounds register poorly, tune `HCR_to_HCR_registration.global` and
+> `.local`: lower `match_threshold` (0.3 → 0.2) to accept weaker centroid correspondences,
+> lower `count_floor` / `match_floor` to let sparse blocks contribute, and widen
+> `context_radius_um` for tissue with less distinctive local geometry. Check the reference
+> round's Cellpose segmentation first — every centroid comes from it.
+
 ## What you get
 
 The primary product is a per-cell matching table,
@@ -151,7 +169,7 @@ Both matchers are reported for every cell rather than reconciled for you, so you
 your own thresholds. Alongside it, `OUTPUT/MERGED/aligned_extracted_features/full_table_*.pkl`
 joins these matches to the per-gene intensities across all FISH rounds.
 
-In the demo, 1,178 of the 1,387 functional cells in the plane are matched — **85%** — with
+In the demo, 1,199 of the 1,387 functional cells in the plane are matched — **86%** — with
 a median overlap of 0.29 in the functional plane, and soma-print confidently calls 83%. A
 tracked copy of the table is in [`demo/completed/`](demo/completed/README.md) to diff your
 run against.
@@ -169,7 +187,7 @@ syntax. It has two top-level sections: `data` (what you're processing) and `para
 | `mouse_name` | Folder name for this experiment. **Outputs are written under this name** |
 | `HCR_confocal_imaging.rounds` | One entry per FISH round: round id, channel names, voxel resolution |
 | `HCR_confocal_imaging.reference_round` | The round all others register to. Pick the one with the best signal |
-| `two_photon_imaging.sessions` | Functional session config. Omit entirely for `--only_hcr` |
+| `two_photon_imaging.sessions` | Functional session config. Omit entirely for FISH-only runs |
 
 Per FISH round:
 
@@ -210,12 +228,12 @@ Set per session by `input_format`:
 | `suite2p` | An existing Suite2p output folder | You already ran Suite2p and want the mean image pulled from it |
 | `sbx` | ScanBox `.sbx` via Suite2p | Andermann-lab internal acquisition format |
 
-`tiff` is the path this pipeline is built around and the one the demo uses. `suite2p` is a
-convenience that extracts the mean image for you. `sbx` exists for in-house acquisition and
-is not expected to be useful outside the lab.
+`tiff` is the path this pipeline is built around and the one the demo uses. `sbx` exists for
+in-house acquisition and is not expected to be useful outside the lab.
 
-> **Note:** `input_format` currently defaults to `sbx` when unset. Set it explicitly to
-> `tiff` in your manifest.
+`input_format` is **required** whenever there is a `two_photon_imaging` section. There is no
+default, an unrecognised value is an error, and there is no command-line switch that
+overrides it.
 
 ### Hi-res structural images
 
@@ -277,8 +295,9 @@ re-run just that step, or the whole `OUTPUT/` folder for a clean run.
 
 ## Citation
 
-If you use EASI-PASS, please cite ‹paper›.
+If you use EASI-PASS, please cite the accompanying paper. Citation details will be added
+here on publication; see [CITATION.cff](CITATION.cff).
 
 ## License
 
-See [LICENSE](LICENSE).
+BSD 3-Clause. See [LICENSE](LICENSE).

@@ -78,13 +78,19 @@ except ImportError:
     from meta import output_root
 
 
-def _resolve_hcr_path(expected_path: Path) -> Path:
+def _resolve_hcr_path(expected_path: Path, alt_stems=()) -> Path:
     """Resolve an HCR TIFF path with case-insensitive and extension-flexible matching.
 
     Users may name files with varying case (e.g. _To_, _to_, _TO_) and extensions
     (.tiff vs .tif). This function finds the actual file on disk that matches the
     expected filename pattern, returning the real path if found, or the original
     expected path if no match exists (so downstream code can report the standard name).
+
+    alt_stems are accepted after the expected stem, in the order given. A moving
+    round is named {mouse}_HCR{N}_to_HCR{ref} once registered, but the acquired
+    file is {mouse}_HCR{N}; accepting both is what lets a first run proceed.
+    Priority is by stem order, not by directory order, so the registered file
+    still wins when both are present.
     """
     if expected_path.exists():
         return expected_path
@@ -92,14 +98,17 @@ def _resolve_hcr_path(expected_path: Path) -> Path:
     parent = expected_path.parent
     if not parent.exists():
         return expected_path
-    stem_lower = expected_path.stem.lower()
+    by_stem = {}
     for candidate in parent.iterdir():
         if not candidate.is_file():
             continue
         if candidate.suffix.lower() not in ('.tiff', '.tif'):
             continue
-        if candidate.stem.lower() == stem_lower:
-            return candidate
+        by_stem.setdefault(candidate.stem.lower(), candidate)
+    for stem in (expected_path.stem, *alt_stems):
+        hit = by_stem.get(stem.lower())
+        if hit is not None:
+            return hit
     return expected_path
 
 
@@ -117,7 +126,9 @@ def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
         if i['round'] == reference_round_number:
             reference_round = _resolve_hcr_path(Path(manifest['base_path']) / manifest['mouse_name'] / 'HCR' / f"{manifest['mouse_name']}_HCR{reference_round_number}.tiff")
         else:
-            mov_rounds.append(_resolve_hcr_path(Path(manifest['base_path']) / manifest['mouse_name'] / 'HCR' / f"{manifest['mouse_name']}_HCR{i['round']}_to_HCR{reference_round_number}.tiff"))
+            mov_rounds.append(_resolve_hcr_path(
+                Path(manifest['base_path']) / manifest['mouse_name'] / 'HCR' / f"{manifest['mouse_name']}_HCR{i['round']}_to_HCR{reference_round_number}.tiff",
+                alt_stems=(f"{manifest['mouse_name']}_HCR{i['round']}",)))
     
     while True:
         missing_files = []
@@ -346,6 +357,23 @@ def _register_rounds_legacy(full_manifest):
     """The original notebook-driven workflow: user runs the scan notebooks, hand-edits
     HCR_selected_registrations, then the pipeline applies. Used for blob method and for
     manifests with no centroid global/local block (backward compatible)."""
+    # This path only works if the scan notebooks have already been run and their result
+    # pasted into the manifest. With neither a centroid block nor HCR_selected_registrations
+    # there is nothing to apply, and continuing would drop every non-reference round and
+    # still report success. Fail here rather than after a dead-end prompt.
+    selected = parse_json(full_manifest['manifest_path'])['params'].get('HCR_selected_registrations')
+    if not selected:
+        raise RuntimeError(
+            "This manifest has multiple HCR rounds but no usable round-to-round "
+            "registration config.\n"
+            f"  Manifest: {full_manifest['manifest_path']}\n"
+            "  params.HCR_to_HCR_registration has no centroid 'global'/'local' block, and\n"
+            "  params.HCR_selected_registrations is absent or empty.\n\n"
+            "Add the centroid 'global'/'local' block to register rounds in-pipeline -- see "
+            "examples/param_example.hjson for a documented copy of it.\n"
+            "Continuing would silently drop every non-reference round."
+        )
+
     rprint("Registration process uses step-by-step jupyter notebooks\n")
 
     rprint("[bold cyan] Step 1): Configure Low-Resolution Parameters[/bold cyan]")
@@ -997,7 +1025,10 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
 
     # Cascade per-tile search sizing (manifest-overridable presets):
     # XY_TILE_RATIO    : stage-0 search_xy = tile_size * ratio; also caps stages 1+
-    # Z_TILE_RATIO     : stage-0 search_z  = max(SEARCH_Z_MIN, round(tile_size * ratio))
+    # Z_TILE_RATIO     : stage-0 search_z  = max(SEARCH_Z_MIN, round(tile_size * ratio)).
+    #                    NOTE: unlike search_xy, this has no upper cap -- for the shipped
+    #                    [300,100,50] cascade the SEARCH_Z_MIN floor dominates almost
+    #                    entirely (see compute_adaptive_matching_params docstring / backlog #3).
     # SEARCH_Z_MIN/MAX : floor (stage 0) and cap (stages 1+) for per-tile Z search
     XY_TILE_RATIO = reg_params.get('xy_tile_ratio', 0.4)
     Z_TILE_RATIO  = reg_params.get('z_tile_ratio',  0.01)
@@ -1070,7 +1101,8 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     # HCR resolution: TIFF metadata is the source of truth; manifest entry is an
     # optional override that emits a loud warning on mismatch.
     manifest_resolution = full_manifest['data']['HCR_confocal_imaging']['rounds'][0].get('resolution')
-    hcr_resolution = resolve_hcr_resolution(hcr_ref_round_path, manifest_resolution)
+    hcr_resolution = resolve_hcr_resolution(hcr_ref_round_path, manifest_resolution,
+                                            require_metadata=True)
     landmarks_df = load_landmarks(landmarks_path, hcr_resolution)
     rprint(f"[dim]Loaded {len(landmarks_df)} landmarks[/dim]")
 
@@ -1088,8 +1120,18 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     # Check if z-flip is needed (some acquisitions have inverted z)
     flip_z = reg_params.get('flip_z', False)
     if flip_z:
-        hcr_ref_masks = hcr_ref_masks[::-1].copy()
-        rprint(f"[yellow]  Z-axis flipped (flip_z=true in manifest)[/yellow]")
+        # This is the only place flip_z is read, and it flips only this local
+        # copy of the HCR reference masks. Every downstream consumer -- probe
+        # intensity extraction, mask matching, the merged table -- reads the
+        # unflipped volume, so the QA overlays would look right while the
+        # per-cell table silently paired 2P cells with the wrong z.
+        raise NotImplementedError(
+            "params.twop_to_hcr_registration.flip_z is not supported.\n"
+            "It flips the HCR reference masks used for registration but not the "
+            "volume every later stage reads, which produces correct-looking QA "
+            "overlays and an incorrect merged table.\n"
+            "Flip the HCR volume on disk before running the pipeline instead."
+        )
     y1, x1 = hcr_ref_masks.shape[1], hcr_ref_masks.shape[2]
     rprint(f"[dim]  HCR masks shape: {hcr_ref_masks.shape} (Z={hcr_ref_masks.shape[0]}, Y={y1}, X={x1})[/dim]")
 
@@ -1779,13 +1821,21 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             qa_paths, ref_auto_path, "2P-to-HCR", REFERENCE_PLANE
         )
 
+        # Returning here would only exit this function: the aligned volume is
+        # already written, and the caller would go on to match, merge and report
+        # success on an alignment the user just rejected. Stop the run instead.
         if choice == "skip":
-            rprint(f"[yellow]Registration skipped by user. Outputs remain but may need re-running.[/yellow]")
-            return
+            raise SystemExit(
+                "\nRegistration skipped at the QA checkpoint.\n"
+                "The aligned volume and QA overlays for this plane are on disk, but nothing "
+                "downstream has run -- matching and merging on a rejected alignment would "
+                "produce a table that looks complete and is not.\n"
+                f"  Landmarks: {ref_auto_path}")
         elif choice == "refine":
-            rprint(f"[yellow]Refinement requested. Re-run pipeline with updated landmarks.[/yellow]")
-            rprint(f"[yellow]Per-plane _auto.csv files saved. Edit and re-run to apply changes.[/yellow]")
-            return
+            raise SystemExit(
+                "\nRefinement requested at the QA checkpoint.\n"
+                "Per-plane _auto.csv landmarks are saved. Edit them and re-run to apply.\n"
+                f"  Landmarks: {ref_auto_path}")
         # accept: continue normally
     elif not automation_enabled and CURRENT_PLANE == REFERENCE_PLANE:
         # Only prompt for review on reference plane in manual mode

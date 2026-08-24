@@ -6,9 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "easipass"
 version = "0.1.0"
 description = "Automated image processing pipeline for 2-photon microscopy and HCR confocal imaging"
+readme = "README.MD"
 requires-python = ">=3.12"
 license = {text = "BSD-3-Clause"}
 license-files = ["LICENSE"]
+keywords = ["two-photon", "HCR", "FISH", "image-registration", "segmentation", "neuroscience"]
+
+# TODO before publishing: confirm names/emails (see CITATION.cff).
+authors = [
+    {name = "Jonnathan Singhal", email = "jsinghal@bidmc.harvard.edu"},
+    {name = "Oren Amsalem", email = "oren.a4@gmail.com"},
+]
+
 
 # Core dependencies — needed for the main pipeline (master_pipeline.py + src/)
 dependencies = [
@@ -52,20 +61,17 @@ dependencies = [
 
     # Fast remapping for segmentation masks
     "fastremap>=1.15",
-]
 
-[project.optional-dependencies]
-
-# 2-photon processing (suite2p + ScanBox reader)
-twop = [
+    # 2-photon ingest. Imported at module scope by easipass/functional.py,
+    # easipass/tiling.py and easipass/segmentation.py, so they are required even
+    # for the TIFF-only path that never reads a ScanBox file.
     "suite2p>=0.14.4",
     "sbxreader>=0.2.2",
-    "roifile",
     "pystackreg>=0.2.7",
-]
 
-# BigStream registration and its dependencies
-bigstream = [
+    # BigStream registration. easipass/bigstream_functions.py and
+    # easipass/registrations.py import these at module scope; the remaining
+    # entries are transitive deps the pinned fork does not declare itself.
     "bigstream @ git+https://github.com/orena1/bigstream.git@b35f4eabbfaf0d96fd66023a07a5106c173b368c",
     "ClusterWrap @ git+https://github.com/GFleishman/ClusterWrap.git@fa718ac49",
     "fishspot>=0.3",
@@ -75,7 +81,18 @@ bigstream = [
     "distributed>=2023.10",
     "dask-jobqueue>=0.9",
     "numba>=0.60",
+
+    # Gaussian mixture gate in easipass/somaprint.py and somaprint_hcr.py.
+    "scikit-learn>=1.5",
 ]
+
+# TODO before publishing: replace with the repository's final public URL.
+[project.urls]
+Homepage = "https://github.com/orena1/ezfish_pipeline"
+Repository = "https://github.com/orena1/ezfish_pipeline"
+Issues = "https://github.com/orena1/ezfish_pipeline/issues"
+
+[project.optional-dependencies]
 
 # Interactive notebooks (HCR-HCR registration, analysis, figures)
 notebooks = [
@@ -89,7 +106,6 @@ notebooks = [
 
 # Analysis notebooks (dimensionality reduction, statistics, ML)
 analysis = [
-    "scikit-learn>=1.5",
     "umap-learn>=0.5.6",
     "xgboost>=2.1",
     "statsmodels>=0.14",
@@ -97,7 +113,7 @@ analysis = [
 
 # Everything
 all = [
-    "easipass[twop,bigstream,notebooks,analysis]",
+    "easipass[notebooks,analysis]",
 ]
 
 [project.scripts]
