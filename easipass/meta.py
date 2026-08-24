@@ -30,13 +30,22 @@ except ImportError:
 def parse_json(json_file):
     """
     Parse a json/hjson manifest. Normalizes base_path slashes so the same
-    manifest works whether loaded on Linux (/mnt/...) or Windows (\\...).
+    manifest works whether loaded on Linux (/mnt/...) or Windows (\\...), and
+    resolves a relative base_path against the manifest's own directory so a
+    manifest can sit beside its data and travel with it.
     """
     with open(json_file, 'r') as f:
         manifest = hjson.load(f)
     bp = manifest.get('data', {}).get('base_path')
     if isinstance(bp, str):
-        manifest['data']['base_path'] = bp.replace('\\', '/')
+        bp = bp.replace('\\', '/')
+        # Checked explicitly rather than with Path.is_absolute(): on Windows a
+        # POSIX path like /mnt/nasquatch/... has no drive and would be reported
+        # as relative, which would silently rewrite every lab manifest.
+        is_absolute = bp.startswith('/') or (len(bp) > 1 and bp[1] == ':')
+        if not is_absolute:
+            bp = (Path(json_file).resolve().parent / bp).resolve().as_posix()
+        manifest['data']['base_path'] = bp
     return manifest
 
 

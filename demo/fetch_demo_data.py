@@ -116,8 +116,8 @@ def main():
     fetch("demo_pre_run", ARCHIVES["demo_pre_run"], args.force)
     if args.with_reference:
         fetch("demo_post_run", ARCHIVES["demo_post_run"], args.force)
-    print("\nNext: set base_path in demo/JS078_demo.hjson to demo/demo_pre_run, "
-          "then run master_pipeline.py.")
+    print("\nNext, from the repository root:\n"
+          "    python master_pipeline.py --manifest demo/JS078_demo.hjson")
 
 
 if __name__ == "__main__":

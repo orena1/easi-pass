@@ -19,7 +19,7 @@ output as input.
 | Functional field of view | One 2D **mean image** per plane, TIFF |
 | Molecular rounds | One multi-channel **3D volume** per FISH round, TIFF |
 | *(optional)* Hi-res structural image | A single stitched 2D TIFF per plane, used as an alignment bridge |
-| A few seed landmarks | Placed once in [BigWarp](https://imagej.net/plugins/bigwarp), between one functional plane and the reference FISH volume. Only needed for cross-modal runs — `--only_hcr` needs none, and **the demo ships its landmarks so your first run is non-interactive** |
+| A few seed landmarks | Placed once in [BigWarp](https://imagej.net/plugins/bigwarp), between one functional plane and the reference FISH volume. Only needed for cross-modal runs — FISH-only runs need none, and **the demo ships its landmarks, so you never open BigWarp to run it** |
 
 Everything else is set in a manifest file.
 
@@ -35,22 +35,17 @@ conda activate easipass
 pip install -e .                      # the pipeline and its Python dependencies
 ```
 
-> **Faster install.** conda's classic solver can spend 10+ minutes on `environment.yml`.
-> Use [mamba](https://mamba.readthedocs.io/) (`mamba env create -f environment.yml`) or the
-> libmamba solver to cut that to seconds. Recent conda versions use libmamba by default.
-
-`environment.yml` covers only what must come from conda channels; everything else is
-declared in `pyproject.toml`.
-
-`pip install -e .` covers every stage and mode. The extras are only for work beyond a
-pipeline run: `.[notebooks]` adds Jupyter and interactive plotting, `.[analysis]` adds stats
-and ML for the analysis notebooks, and `.[all]` adds both.
-
-> **BigStream fork:** multi-round FISH registration installs a pinned fork from git. To use
-> a local checkout instead: `pip install -e /path/to/bigstream`.
+`environment.yml` carries only what must come from conda channels — Python and CUDA-enabled
+PyTorch. Everything else is a pip dependency in `pyproject.toml`, and `pip install -e .`
+covers every stage and mode. Optional extras: `.[notebooks]` for Jupyter, `.[analysis]` for
+the analysis notebooks, `.[all]` for both.
 
 Cross-modal runs also need [Fiji](https://fiji.sc/)'s BigWarp for placing seed landmarks
 (Plugins > BigDataViewer > Big Warp). See [docs/landmarks.md](docs/landmarks.md).
+
+> If `conda env create` is slow, [mamba](https://mamba.readthedocs.io/) does the same job in
+> seconds. Multi-round registration pulls a pinned BigStream fork from git; to use a local
+> checkout instead, `pip install -e /path/to/bigstream` afterwards.
 
 ## Start with the demo
 
@@ -60,12 +55,12 @@ against. It is the fastest way to confirm your install works and to see what goe
 what comes out.
 
 ```bash
-cd demo
-python fetch_demo_data.py                      # downloads the imaging data
-# edit demo/JS078_demo.hjson: set base_path to demo/demo_pre_run
-cd ..
+python demo/fetch_demo_data.py     # downloads the imaging data
 python master_pipeline.py --manifest demo/JS078_demo.hjson
 ```
+
+Nothing to edit — the demo manifest points at its own data. The run pauses three times to
+let you check intermediate output; `demo/README.md` gives the answers.
 
 ## Running your own data
 

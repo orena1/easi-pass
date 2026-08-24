@@ -53,7 +53,7 @@ from tifffile import imwrite as tif_imwrite
 from tifffile import imread as tif_imread
 # RBFInterpolator/griddata now handled in registrations_utils.py
 
-# bigstream: prefer the pip-installed package (`pip install -e ".[bigstream]"`).
+# bigstream: prefer the pip-installed package (a core dependency).
 # Only if it isn't importable, fall back to a local checkout (lab dev machines),
 # adding the first path that actually exists.
 import importlib.util
@@ -330,9 +330,10 @@ def register_rounds(full_manifest):
     rprint("="*80)
     rprint(f"Found {len(manifest['HCR_confocal_imaging']['rounds'])} HCR rounds in manifest")
 
-    # Choose method. Centroid (in-pipeline compute + review) when the manifest's
-    # HCR_to_HCR_registration has a centroid global+local block; otherwise fall back to the
-    # legacy notebook workflow (blob lives there for now -- removing blob later is one branch).
+    # Centroid registration (in-pipeline compute + review) runs when the manifest's
+    # HCR_to_HCR_registration carries a global+local block. Without one, the legacy
+    # notebook path is the only remaining option, and it raises unless the notebook
+    # result was already pasted into the manifest.
     try:
         from .hcr_centroid_registration import get_centroid_config
     except ImportError:
@@ -355,8 +356,8 @@ def register_rounds(full_manifest):
 
 def _register_rounds_legacy(full_manifest):
     """The original notebook-driven workflow: user runs the scan notebooks, hand-edits
-    HCR_selected_registrations, then the pipeline applies. Used for blob method and for
-    manifests with no centroid global/local block (backward compatible)."""
+    HCR_selected_registrations, then the pipeline applies. Reached only by manifests with
+    no centroid global/local block; the scan notebooks are not part of this release."""
     # This path only works if the scan notebooks have already been run and their result
     # pasted into the manifest. With neither a centroid block nor HCR_selected_registrations
     # there is nothing to apply, and continuing would drop every non-reference round and

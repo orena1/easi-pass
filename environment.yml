@@ -1,21 +1,11 @@
 # EASI-PASS — conda environment
 #
-# This installs ONLY the packages that require conda channels (GPU support, etc.).
-# After creating this env, install the pipeline and all Python deps with:
+# Only what has to come from conda channels: Python and CUDA-enabled PyTorch.
+# Everything else is a pip dependency declared in pyproject.toml.
 #
-#   pip install -e ".[all]"
-#
-# `pip install -e "."` already covers the full pipeline, every stage and mode.
-# The extras are only for work beyond a pipeline run:
-#   pip install -e ".[notebooks]"   # + Jupyter/interactive plotting
-#   pip install -e ".[analysis]"    # + ML/stats for analysis notebooks
-#   pip install -e ".[all]"         # everything
-#
-# BIGSTREAM: the pinned fork is installed automatically from git as a core
-# dependency. To use a local checkout instead: pip install -e /path/to/bigstream
-#
-# FULL SETUP (one-liner):
-#   conda env create -f environment.yml && conda activate easipass && pip install -e ".[all]"
+#   conda env create -f environment.yml
+#   conda activate easipass
+#   pip install -e .
 
 name: easipass
 

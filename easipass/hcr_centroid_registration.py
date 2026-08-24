@@ -15,7 +15,7 @@ Two stages, both reusing existing engines (no new registration math):
              centroids INJECTED as fix_spots_global / mov_spots_global and the global affine
              supplied as the per-block prior (static_transform_list). Ported from
              _profile_local_reg.coverage_sweep, including the adaptive_cc_contexts edge
-             monkeypatch and the loosened blob-era spot/match floors.
+             monkeypatch and the loosened spot/match floors.
 
 Outputs land in the EXISTING registrations/ layout so registration_apply(),
 verify_rounds() and align_masks_to_reference() need no changes:
@@ -33,8 +33,6 @@ Public entry: run_hcr_centroid_registration(full_manifest) -> per-round ranked r
 Selection of the winner + manifest write-back is handled by register_rounds() in
 registrations.py; this module only computes, scores, and writes candidates.
 
-NOTE: blob-based registration is intentionally NOT handled here -- it stays on the legacy
-notebook path (register_rounds), so removing blob later is a single-branch deletion.
 """
 import shutil
 import hashlib
@@ -82,8 +80,8 @@ _LOCAL_DEFAULTS = dict(
     context_radius_um=None,          # OPT-IN: global-style um window for blocks (experiment knob)
     match_threshold=0.3,
     max_spot_match_distance_um=60.0,
-    count_floor=8,                   # loosened spot-count floor (blob era was 100)
-    match_floor=4,                   # loosened point-matches floor (blob era was 50)
+    count_floor=8,                   # minimum centroids per block
+    match_floor=4,                   # minimum point matches per block
     adaptive_edges=True,
     nspots=5000,
     blob_sizes=[6, 30],              # REQUIRED by bigstream's signature; ignored when spots injected

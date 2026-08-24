@@ -46,18 +46,16 @@ golden CSV are tracked in git; the imaging data is attached to the GitHub releas
 
 ## Run it
 
+Both commands run from the repository root. There is nothing to edit: the manifest's
+`base_path` is relative, so it finds its own data.
+
 1. **Get the data:**
    ```bash
-   cd demo
-   python fetch_demo_data.py                   # the fresh dataset (demo_pre_run/)
-   python fetch_demo_data.py --with-reference  # also grab the completed reference (demo_post_run/)
+   python demo/fetch_demo_data.py                   # the dataset you run on (demo_pre_run/)
+   python demo/fetch_demo_data.py --with-reference  # optional: the completed reference too
    ```
 
-2. **Point the manifest at it:** open `demo/JS078_demo.hjson` and set `base_path` to the
-   absolute path of `demo/demo_pre_run` on your machine, e.g.
-   `/home/you/ezfish_pipeline/demo/demo_pre_run`.
-
-3. **Run the pipeline** (from the repo root):
+2. **Run the pipeline:**
    ```bash
    python master_pipeline.py --manifest demo/JS078_demo.hjson
    ```
