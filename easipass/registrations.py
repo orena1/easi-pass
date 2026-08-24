@@ -125,21 +125,48 @@ def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
     ref = manifest['HCR_confocal_imaging']['reference_round']
     reference_round_number = ref
     hcr_dir = Path(manifest['base_path']) / sample / 'HCR'
-    # The sample-name prefix is optional: the file already lives in {sample}/HCR/,
-    # so requiring it means renaming every volume on the way in, and renaming them
-    # again if the folder is ever renamed. Stems are tried in order, so a
-    # registered file still wins over an acquired one of the same round.
+
+    def _spellings(r):
+        """Round '01' and '1' name the same round. Accepting both removes a
+        silent miss when the manifest and the filename disagree on padding."""
+        out = [str(r)]
+        try:
+            n = int(r)
+        except (TypeError, ValueError):
+            return out
+        for alt in (str(n), f"{n:02d}"):
+            if alt not in out:
+                out.append(alt)
+        return out
+
+    def _stems(r):
+        """Accepted names for round r, most specific first, so a registered
+        volume always wins over an acquired one of the same round. The
+        sample-name prefix is optional: the file already lives in {sample}/HCR/,
+        and requiring it means renaming every volume on the way in."""
+        stems = []
+        for rr in _spellings(r):
+            for ff in _spellings(ref):
+                stems.append(f"{sample}_HCR{rr}_to_HCR{ff}")
+        for rr in _spellings(r):
+            stems.append(f"{sample}_HCR{rr}")
+        for rr in _spellings(r):
+            for ff in _spellings(ref):
+                stems.append(f"HCR{rr}_to_HCR{ff}")
+        for rr in _spellings(r):
+            stems.append(f"HCR{rr}")
+        return stems
+
     for i in manifest['HCR_confocal_imaging']['rounds']:
         if i['round'] == ref:
+            stems = [f"{sample}_HCR{rr}" for rr in _spellings(ref)]
+            stems += [f"HCR{rr}" for rr in _spellings(ref)]
             reference_round = _resolve_hcr_path(
-                hcr_dir / f"{sample}_HCR{ref}.tiff",
-                alt_stems=(f"HCR{ref}",))
+                hcr_dir / f"{stems[0]}.tiff", alt_stems=tuple(stems[1:]))
         else:
+            stems = _stems(i['round'])
             mov_rounds.append(_resolve_hcr_path(
-                hcr_dir / f"{sample}_HCR{i['round']}_to_HCR{ref}.tiff",
-                alt_stems=(f"{sample}_HCR{i['round']}",
-                           f"HCR{i['round']}_to_HCR{ref}",
-                           f"HCR{i['round']}")))
+                hcr_dir / f"{stems[0]}.tiff", alt_stems=tuple(stems[1:])))
     
     while True:
         missing_files = []
