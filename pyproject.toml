@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=68"]
+# 77 is the floor for the PEP 639 license fields used below. Older setuptools
+# rejects `license` as a plain SPDX string; newer setuptools rejects the
+# `{text = ...}` table it replaced, so the two forms cannot both be supported.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +11,7 @@ version = "0.1.0"
 description = "Automated image processing pipeline for 2-photon microscopy and HCR confocal imaging"
 readme = "README.MD"
 requires-python = ">=3.12"
-license = {text = "BSD-3-Clause"}
+license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 keywords = ["two-photon", "HCR", "FISH", "image-registration", "segmentation", "neuroscience"]
 

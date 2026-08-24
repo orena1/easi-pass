@@ -187,10 +187,14 @@ def _keep_sz(cent, area):
 
 def score_mi(A, fix, mov, fsp, msp):
     """Image MI on RAW (non-boosted) DAPI -- an INDEPENDENT sanity verdict (the centroid matcher
-    optimises NN, not image MI). More negative = better. NEVER score boosted images."""
+    optimises NN, not image MI). More negative = better. NEVER score boosted images.
+
+    Returns (mi, aligned) -- the warped mov is handed back so the caller can write the QC
+    composite from the SAME warp instead of recomputing it (the score you read and the overlay
+    you inspect are then guaranteed to be the same image)."""
     from bigstream.transform import apply_transform
     al = np.asarray(apply_transform(fix, mov, fsp, msp, transform_list=[np.asarray(A)]))
-    return float(get_registration_score(al, fix))
+    return float(get_registration_score(al, fix)), al
 
 
 # --------------------------------------------------------------------------- #
@@ -362,11 +366,20 @@ def _load_round_data(reference_round, mov_round, fix_mask_path, mov_mask_path, d
 # --------------------------------------------------------------------------- #
 #  GLOBAL  -- cap-free 2D-context centroid affine (ported centroid_global_batched)
 # --------------------------------------------------------------------------- #
-def global_centroid(S, gcfg, batch=2000):
-    """Sweep gcfg['context_radius_um'] and return (best_A, best_radius, table) where table is a
-    list of per-radius dicts {radius_um, above_chance, n_mut, med_resid, mi}. Best is chosen by
-    gcfg['select_metric']. Ported from centroid_global_batched (the robust, no-prior, no-rotation
-    global) + an MI sanity column."""
+def global_centroid(S, gcfg, emit=None, batch=2000):
+    """Sweep gcfg['context_radius_um'] and return (table, suggested_idx), where table is a list of
+    per-radius dicts {radius_um, above_chance, n_mut, med_resid, mi, A} and suggested_idx points at
+    the row gcfg['select_metric'] favours. EVERY radius is kept -- the metrics routinely disagree
+    (MI can prefer a radius with fewer mutual inliers and a worse residual), so the caller shows
+    the whole table and the suggestion is advisory, not a filter.
+
+    `emit(row, aligned)` is called once per radius, right after it is scored, with the warped
+    lowres mov. The caller uses it to persist that radius' _affine.mat + QC composite before the
+    next radius overwrites `aligned`, so all candidates are on disk to inspect BEFORE anything is
+    chosen. Writing as we go (rather than returning N warped volumes) keeps peak memory at one
+    lowres volume regardless of how many radii are swept.
+
+    Ported from centroid_global_batched (the robust, no-prior, no-rotation global) + an MI column."""
     import cv2
     gate = float(gcfg['inlier_gate_um']); mt = float(gcfg['match_threshold'])
     rth = float(gcfg['ransac_threshold_um'])
