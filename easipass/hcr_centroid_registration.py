@@ -29,9 +29,18 @@ verify_rounds() and align_masks_to_reference() need no changes:
 parses it. The selected_registrations entry written into the manifest is
 '<global_tag>/<local_tag>'.
 
-Public entry: run_hcr_centroid_registration(full_manifest) -> per-round ranked results.
-Selection of the winner + manifest write-back is handled by register_rounds() in
-registrations.py; this module only computes, scores, and writes candidates.
+EVERY candidate is persisted, not just the scored winner: each swept global radius gets its own
+<global_tag>/_affine.mat plus a composite under registrations/composites/global/, and each local
+blocksize gets its own <global_tag>/<local_tag>/ plus one under composites/local/. The metrics
+SUGGEST a row; nothing is deleted for losing. This matters because the coarse metrics disagree in
+practice -- MI, mutual-inlier count and residual can each favour a different radius -- so the
+person looking at the overlays needs all of them on disk to compare.
+
+Public entry: run_hcr_centroid_registration(...) -> per-round ranked results.
+Selection + manifest write-back is handled by register_rounds() in registrations.py. The one
+exception is the COARSE pick, which must be settled mid-run (the expensive deform is seeded by
+that affine): the caller passes a `choose_global` callback that is invoked once the coarse
+composites are written. Leave it None for unattended runs -> the suggestion is taken.
 
 """
 import shutil
@@ -412,12 +421,17 @@ def global_centroid(S, gcfg, emit=None, batch=2000):
                         rprint(f"    [yellow]global r{r_um}um ransac err {type(e).__name__}: {e}[/yellow]")
         n_mut, med = mutual_inliers(A, fcp, mcp, gate)
         above = n_mut - null_mutual(A, fcp, mcp, gate)
-        mi = score_mi(A, S['fix_lo'], S['mov_lo'], S['lo_sp_f'], S['lo_sp_m'])
+        mi, aligned = score_mi(A, S['fix_lo'], S['mov_lo'], S['lo_sp_f'], S['lo_sp_m'])
         row = dict(radius_um=r_um, above_chance=above, n_mut=n_mut,
                    med_resid=med, mi=mi, A=A)
+        if emit is not None:
+            emit(row, aligned)             # persist this candidate NOW (stamps tag/dir/composite on row)
+        del aligned                        # one lowres volume alive at a time
         table.append(row)
-    pick = _pick_global(table, 'mi')        # both stages picked by raw-DAPI MI (most negative = best)
-    return pick['A'], pick['radius_um'], table
+    pick = _pick_global(table, 'mi')        # both stages suggested by raw-DAPI MI (most negative = best)
+    # identity, not equality: rows hold numpy arrays, so `table.index(pick)` would compare arrays
+    sug = next(i for i, r in enumerate(table) if r is pick)
+    return table, sug
 
 
 def _pick_global(table, metric):
@@ -656,9 +670,11 @@ def _print_ladder(round_to_rounds, ref, gcfg, lcfg):
     rprint(f"[bold] HCR→HCR registration · {len(round_to_rounds)} round(s) → HCR{ref}[/bold]")
     rprint("  [dim]Mode: cellpose centroids (nucleus landmarks)[/dim]")
     rprint("═" * 72)
-    rprint(f"  [cyan]1 COARSE[/cyan]  whole-volume affine · context window {radii}µm (best by [b]mi[/b])")
-    rprint(f"  [cyan]2 FINE  [/cyan]  local deform · tile sizes {blocks} (best by [b]mi[/b]; "
-           f"cached deform reused when unchanged)")
+    rprint(f"  [cyan]1 COARSE[/cyan]  whole-volume affine · context window {radii}µm")
+    rprint(f"  [cyan]2 FINE  [/cyan]  local deform · tile sizes {blocks} "
+           f"[dim](cached deform reused when unchanged)[/dim]")
+    rprint("  [dim]Every candidate is written to disk and listed with a composite tiff; [b]mi[/b] "
+           "only suggests — you pick the row.[/dim]")
     rprint("═" * 72)
 
 
@@ -703,17 +719,26 @@ def _assess_local(best, global_med):
 # --------------------------------------------------------------------------- #
 #  DRIVER
 # --------------------------------------------------------------------------- #
-def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds):
+def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds,
+                                  choose_global=None):
     """Compute global+local centroid registration for every mov round, write candidates into
     the existing registrations/ layout, and return a per-round ranked summary:
 
         { round: {
-            'global': {'tag','radius_um','table'(per-radius),'A'},
+            'global_tag','radius_um','A','global_table' (EVERY radius, each with tag/dir/composite),
+            'global_index','global_suggested',
             'candidates': [ {'tag','local_tag','blocksize','medResid_um','frac_under5',
-                             'moved','total','dir'} ... ranked best-first ],
+                             'moved','total','dir','composite'} ... ranked best-first ],
         } }
 
-    Selection of the winner + manifest write-back is done by the caller (register_rounds).
+    Every coarse radius AND every fine blocksize is written to disk and left there; the metrics
+    only ever *suggest*. `choose_global(rnd, ref, gtable, suggested_idx) -> idx` is called after
+    the coarse composites are on disk and the table is printed, so a human can open the tiffs and
+    answer with an index. Leave it None (notebooks, sweeps, unattended runs) to take the suggestion.
+    The coarse pick is asked BEFORE the fine stage because the deform is seeded by that affine and
+    is the expensive step -- picking after the fact would mean recomputing it.
+
+    Selection of the fine winner + manifest write-back is done by the caller (register_rounds).
     """
     out_root = output_root(full_manifest) / 'HCR'
     cellpose_dir = out_root / 'cellpose'
@@ -753,32 +778,55 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
             rprint(f"  data: fix {fy}×{fx}×{fz} ([b]{nfix}[/b] nuclei) · "
                    f"mov {my}×{mx}×{mz} ([b]{nmov}[/b] nuclei)")
 
-            # ---- GLOBAL ----
+            # ---- GLOBAL (sweep radii; EVERY one persisted, then suggested/chosen) ----
             rfolder = get_round_folder_name(rnd, ref)
-            A_g, r_best, gtable = global_centroid(S, gcfg)
-            gtag = _global_tag(r_best, gcfg['match_threshold'])
-            rprint(f"  [cyan][1/2] COARSE[/cyan]  picked context window [b]{r_best}µm[/b] by mi")
-            rprint(f"      {'radius':>7}{'above':>8}{'n_mut':>8}{'medResid':>10}{'MI':>9}")
-            for row in gtable:
-                mark = "  [b]◄ pick[/b]" if row['radius_um'] == r_best else ""
+
+            def _emit_global(row, aligned, _rf=rfolder):
+                """Persist one coarse candidate the moment it is scored: its own _affine.mat dir
+                (so it is selectable later) + a QC composite reusing the MI warp. Stamps the paths
+                onto the row. Nothing is discarded for losing the MI comparison."""
+                tag = _global_tag(row['radius_um'], gcfg['match_threshold'])
+                gd = out_root / 'registrations' / _rf / tag
+                gd.mkdir(parents=True, exist_ok=True)
+                np.savetxt(str(gd / "_affine.mat"), row['A'])
+                comp = comp_global / f"{_rf}__{tag}.tiff"
+                try:
+                    _write_composite(S['fix_lo'], S['mov_lo'], S['lo_sp_f'], S['lo_sp_m'],
+                                     [row['A']], comp, aligned=aligned)
+                except Exception as e:
+                    rprint(f"      [yellow]coarse composite r{row['radius_um']}µm failed: "
+                           f"{type(e).__name__}: {e}[/yellow]")
+                    comp = None
+                row['tag'] = tag; row['dir'] = str(gd)
+                row['composite'] = str(comp) if comp else None
+
+            gtable, sug_i = global_centroid(S, gcfg, emit=_emit_global)
+            rprint(f"  [cyan][1/2] COARSE[/cyan]  {len(gtable)} context window(s) tried, "
+                   f"all saved — suggested pick by [b]mi[/b]")
+            rprint(f"      {'#':>3}  {'radius':>7}{'above':>8}{'n_mut':>8}{'medResid':>10}{'MI':>9}")
+            for i, row in enumerate(gtable):
+                mark = "  [b]◄ suggested[/b]" if i == sug_i else ""
                 mr = row['med_resid'] if row['med_resid'] == row['med_resid'] else float('nan')
-                rprint(f"      {str(int(row['radius_um']))+'µm':>7}{row['above_chance']:>8}{row['n_mut']:>8}"
-                       f"{mr:>10.2f}{row['mi']:>+9.3f}{mark}")
-            picked = next(r for r in gtable if r['radius_um'] == r_best)
+                rprint(f"      {i:>3}  {str(int(row['radius_um']))+'µm':>7}{row['above_chance']:>8}"
+                       f"{row['n_mut']:>8}{mr:>10.2f}{row['mi']:>+9.3f}{mark}")
+            rprint("      [dim]composites (open these before choosing):[/dim]")
+            for i, row in enumerate(gtable):
+                rprint(f"      [dim]  [{i}] {row['composite'] or '(write failed)'}[/dim]")
+
+            # Advisory, not a filter: the caller may block here for a human pick. Default = suggestion.
+            gi = sug_i if choose_global is None else choose_global(rnd, ref, gtable, sug_i)
+            picked = gtable[gi]
+            A_g, r_best, gtag = picked['A'], picked['radius_um'], picked['tag']
+            gdir = Path(picked['dir'])
+            if gi != sug_i:
+                rprint(f"      [yellow]using row {gi} ({int(r_best)}µm) instead of the "
+                       f"suggested row {sug_i}[/yellow]")
+
             g_sev, g_msgs = _assess_global(picked, nfix, nmov)
             if g_sev == 0:
                 rprint(f"      {_sev_badge(0)} locked: {picked['n_mut']} mutual inliers "
                        f"({100*picked['n_mut']/max(1,min(nfix,nmov)):.0f}% of cells), residual {picked['med_resid']:.1f}µm")
             _print_msgs(g_sev, g_msgs)
-            gdir = out_root / 'registrations' / rfolder / gtag
-            gdir.mkdir(parents=True, exist_ok=True)
-            np.savetxt(str(gdir / "_affine.mat"), A_g)
-            gcomp = comp_global / f"{rfolder}__{gtag}.tiff"
-            try:                                  # coarse composite saved NOW (right after the coarse fit)
-                _write_composite(S['fix_lo'], S['mov_lo'], S['lo_sp_f'], S['lo_sp_m'], [A_g], gcomp)
-                rprint(f"      [dim]↳ check composite: {gcomp}[/dim]")
-            except Exception as e:
-                rprint(f"  [yellow]coarse composite write failed: {type(e).__name__}: {e}[/yellow]")
 
             # RESUME fingerprint: mask identity (size+mtime, changes on re-seg) + the global affine.
             # A match -> reuse the cached deform.zarr and skip the expensive align; any change -> recompute.
@@ -835,6 +883,7 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
                    + ("" if sev == 0 else f"  ([dim]coarse {_SEV[g_sev][2]} · fine {_SEV[l_sev][2]}[/dim])"))
 
             results[rnd] = dict(global_tag=gtag, radius_um=r_best, table=gtable, A=A_g,
+                                global_table=gtable, global_index=gi, global_suggested=sug_i,
                                 candidates=candidates, severity=sev,
                                 flags=[f"global: {m}" for m in g_msgs] + [f"local: {m}" for m in l_msgs])
     return results

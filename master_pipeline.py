@@ -42,7 +42,8 @@ def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog='easipass',
         description='EASI-PASS: 2-photon to HCR registration and mask matching pipeline.')
-    parser.add_argument('--manifest', required=True, help='Path to the pipeline manifest file e.g. examples/CIM132.hjson')
+    parser.add_argument('--manifest', required=True,
+                        help='Path to the pipeline manifest file, e.g. examples/demo_tiff.hjson')
     parser.add_argument('--only_hcr', action='store_true',
                         help='FISH rounds + segmentation only; skip the functional side. '
                              'Inferred automatically when the manifest has no two_photon_imaging '

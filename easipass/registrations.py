@@ -406,8 +406,14 @@ def _register_rounds_legacy(full_manifest):
 
 
 def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds):
-    """In-pipeline centroid registration: compute global+local candidates, show a ranked review
-    per round, auto-suggest the winner, write the chosen tag into the manifest, then apply."""
+    """In-pipeline centroid registration. TWO review points per round, both the same shape:
+    every candidate is computed and written to disk with a composite tiff, the metrics only
+    SUGGEST a row, and the user picks by index after inspecting the tiffs.
+
+      COARSE — asked mid-run (inside the driver, via the choose_global callback) because the
+               expensive deform is seeded by the chosen affine.
+      FINE   — asked here, once the blocksizes for that round are done.
+    """
     try:
         from .hcr_centroid_registration import run_hcr_centroid_registration
     except ImportError:
@@ -415,7 +421,8 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
 
     rprint("[bold]Computing centroid global + local registration (this runs the real pipeline; "
            "may take a while per round)...[/bold]")
-    results = run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds)
+    results = run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round,
+                                            gcfg, lcfg, ds, choose_global=_choose_global_interactive)
 
     chosen = {}   # round -> "global_tag/local_tag"
     for rnd, res in results.items():
@@ -423,13 +430,18 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
         if not cands:
             rprint(f"[red]HCR{rnd}: no local candidates produced — skipping (check masks/logs)[/red]")
             continue
-        rprint(f"\n[bold]HCR{rnd} → HCR{reference_round['round']} — candidates (ranked by MI):[/bold]")
+        rprint(f"\n[bold]HCR{rnd} → HCR{reference_round['round']} — fine candidates "
+               f"(all saved; ranked by MI):[/bold]")
         rprint(f"  {'#':>2}  {'local config':<44}{'MI':>9}{'medResid':>10}{'frac<5':>8}{'coverage':>11}")
         for i, c in enumerate(cands):
+            mark = "  [b]◄ suggested[/b]" if i == 0 else ""
             rprint(f"  {i:>2}  {c['local_tag']:<44}{c.get('mi', float('nan')):>+9.3f}{c['medResid_um']:>9.2f}u"
-                   f"{c['frac_under5']*100:>6.0f}%{c['moved']:>7}/{c['total']:<3}")
+                   f"{c['frac_under5']*100:>6.0f}%{c['moved']:>7}/{c['total']:<3}{mark}")
+        rprint("  [dim]composites (open these before choosing):[/dim]")
+        for i, c in enumerate(cands):
+            rprint(f"  [dim]  [{i}] {c.get('composite') or '(write failed)'}[/dim]")
         rprint(f"  global: [cyan]{res['global_tag']}[/cyan] (r={res['radius_um']}um)  |  "
-               f"outputs+overlays under [dim]{Path(cands[0]['dir']).parent}[/dim]")
+               f"outputs under [dim]{Path(cands[0]['dir']).parent}[/dim]")
         # Surface the red-flag verdict so a bad registration isn't accepted blind.
         sev = res.get('severity', 0); flags = res.get('flags', [])
         _badge = {0: "[green]✓ OK[/green]", 1: "[yellow]⚠ WARN[/yellow]", 2: "[red]✗ RED FLAG[/red]"}[sev]
@@ -439,7 +451,7 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
         if sev == 2:
             rprint("  [red]↳ top pick is RED-FLAGGED — inspect the overlay before accepting.[/red]")
         best = cands[0]
-        rprint(f"  [green]Top pick → row 0:[/green] {best['local_tag']}")
+        rprint(f"  [green]Suggested → row 0:[/green] {best['local_tag']}")
         rprint("  Press [green]Enter[/green] to accept, or type a row # / local_tag to override:")
         chosen_cand = _resolve_candidate(input().strip(), cands)
         chosen[str(rnd)] = chosen_cand['tag']
@@ -456,6 +468,35 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
     verify_rounds(full_manifest, parse_registered=True, print_registered=True)
     registration_apply(full_manifest)
     rprint("\n[green]✅ Registration applied[/green]")
+
+
+def _choose_global_interactive(rnd, ref, gtable, sug):
+    """Blocking COARSE review, called from inside the centroid driver once every radius has its
+    _affine.mat + composite tiff on disk. The scored table and the composite paths have just been
+    printed by the driver, so this only asks. Returns the chosen row index.
+
+    Exists because the coarse metrics genuinely disagree: MI, mutual-inlier count and residual
+    can each favour a different radius, and MI is the tiebreak only by convention. Whoever is
+    looking at the overlays gets the last word."""
+    rprint(f"      [green]Suggested → row {sug}[/green] ({int(gtable[sug]['radius_um'])}µm). "
+           f"Open the composites above, then press [green]Enter[/green] to accept, "
+           f"or type a row # / radius to override:")
+    return _resolve_global(input().strip(), gtable, sug)
+
+
+def _resolve_global(sel, gtable, sug):
+    """Map a coarse review reply to a row index: empty -> suggested; a row # -> that row;
+    a radius ('60', '60um', '60µm') or a global tag -> the matching row."""
+    if not sel:
+        return sug
+    if sel.isdigit() and int(sel) < len(gtable):      # radii are tens of µm, so a small int is a row #
+        return int(sel)
+    norm = sel.lower().rstrip('m').rstrip('uµ')       # '60um'/'60µm'/'60u' -> '60'
+    for i, r in enumerate(gtable):
+        if norm == str(int(r['radius_um'])) or sel == (r.get('tag') or ''):
+            return i
+    rprint(f"      [yellow]'{sel}' not recognised — using suggested row {sug}[/yellow]")
+    return sug
 
 
 def _resolve_candidate(sel, cands):

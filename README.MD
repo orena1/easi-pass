@@ -270,6 +270,12 @@ The image must already be stitched.
             └── aligned_extracted_features/   <- final per-cell tables
 ```
 
+## Expected noise on startup
+
+Suite2p prints `pynwb not installed, save_nwb, read_nwb, and nwb_to_binary will not work`
+every time it is imported. NWB is a file format EASI-PASS never touches; nothing is missing
+and there is nothing to install.
+
 ## Re-running
 
 The pipeline skips a step when its output already exists. Delete a step's output files to
