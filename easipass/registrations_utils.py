@@ -56,6 +56,8 @@ def prompt_overwrite_per_plane(plane_idx: int, output_path: Path, overwrite_stat
     print(f"\n[registration] Existing output found:\n    {output_path}")
     print("    y = overwrite / recompute from scratch")
     print("    n = keep the existing files (choose this if they were provided/pre-seeded)")
+    # overwrite_state caches this answer, so it silently governs every later plane too.
+    print("  You are asked once: this answer is reused for every remaining plane.")
     while True:
         response = input("Overwrite? [y/n]: ").strip().lower()
         if response == 'y':

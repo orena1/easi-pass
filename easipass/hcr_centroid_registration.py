@@ -809,7 +809,7 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
                 mr = row['med_resid'] if row['med_resid'] == row['med_resid'] else float('nan')
                 rprint(f"      {i:>3}  {str(int(row['radius_um']))+'µm':>7}{row['above_chance']:>8}"
                        f"{row['n_mut']:>8}{mr:>10.2f}{row['mi']:>+9.3f}{mark}")
-            rprint("      [dim]composites (open these before choosing):[/dim]")
+            rprint("      [dim]overlay images (open these before choosing):[/dim]")
             for i, row in enumerate(gtable):
                 rprint(f"      [dim]  [{i}] {row['composite'] or '(write failed)'}[/dim]")
 
@@ -876,7 +876,7 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
                     verb = "improved" if d_mi < 0 else "worsened"
                     rprint(f"      MI coarse→fine: {picked['mi']:+.3f} → {best['mi']:+.3f} "
                            f"(Δ {d_mi:+.3f}, deform {verb} the fit)")
-                rprint(f"      [dim]↳ check composite: {best['composite']}[/dim]")
+                rprint(f"      [dim]↳ overlay image: {best['composite']}[/dim]")
             _print_msgs(l_sev, l_msgs)
             sev = max(g_sev, l_sev)
             rprint(f"  VERDICT HCR{rnd} → HCR{ref}: {_sev_badge(sev)}"

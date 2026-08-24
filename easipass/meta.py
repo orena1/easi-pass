@@ -21,10 +21,21 @@ except ImportError:
     class Prompt:
         @staticmethod
         def ask(prompt, choices=None, default=None, **kwargs):
-            ans = input(str(prompt) + ' ').strip()
-            if not ans and default is not None:
-                return default
-            return ans
+            # Mirror rich's Prompt.ask: SHOW the options and the default, and keep asking
+            # until the answer is one of them. Previously `choices` was accepted and then
+            # ignored, so without rich the user saw a bare prompt with no hint of the valid
+            # answers, and a typo was returned verbatim -- landing in whatever the caller's
+            # else-branch did (at the automation checkpoint, silently skipping the plane).
+            suffix = f" [{'/'.join(choices)}]" if choices else ""
+            if default is not None:
+                suffix += f" ({default})"
+            while True:
+                ans = input(f"{str(prompt)}{suffix}: ").strip()
+                if not ans and default is not None:
+                    return default
+                if not choices or ans in choices:
+                    return ans
+                print(f"  Please enter one of: {', '.join(choices)}")
 
 
 def parse_json(json_file):
@@ -72,8 +83,15 @@ def user_input_missing(check_results, message, color):
         print("Missing:")
         for p in missing:
             print(f"  {p}")
-        out = Prompt.ask(f"\n[italic {color}]{message}[/italic {color}]",
-                         choices=["y", "n", "check-again"])
+        # The message carries rich markup, so it goes through rprint; only the bare label is
+        # handed to Prompt.ask (the no-rich fallback would print the tags literally).
+        # Spell out what each answer DOES -- 'y' here continues the run with these files
+        # absent, which is the consequential one and was never stated.
+        rprint(f"\n[italic {color}]{message}[/italic {color}]")
+        rprint("  [green]y[/green]           = continue anyway, without these files")
+        rprint("  [red]n[/red]           = stop now")
+        rprint("  [yellow]check-again[/yellow] = re-check these paths (add the files first, then choose this)")
+        out = Prompt.ask("Your choice", choices=["y", "n", "check-again"])
         if out == 'n':
             sys.exit()
         if out == 'y':

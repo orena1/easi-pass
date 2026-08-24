@@ -168,7 +168,7 @@ def prompt_registration_checkpoint(qa_paths, auto_landmarks_path, step_name, pla
     rprint("  \\[[yellow]r[/yellow]] Refine - edit landmarks_auto.csv in BigWarp, then re-run")
     rprint("  \\[[red]n[/red]] Skip - skip this plane, continue with others\n")
 
-    choice = Prompt.ask("Your choice", choices=["y", "r", "n"], default="y")
+    choice = Prompt.ask("Accept, refine, or skip?", choices=["y", "r", "n"], default="y")
 
     if choice == "y":
         return "accept"

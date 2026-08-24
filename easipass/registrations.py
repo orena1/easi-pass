@@ -437,7 +437,7 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
             mark = "  [b]◄ suggested[/b]" if i == 0 else ""
             rprint(f"  {i:>2}  {c['local_tag']:<44}{c.get('mi', float('nan')):>+9.3f}{c['medResid_um']:>9.2f}u"
                    f"{c['frac_under5']*100:>6.0f}%{c['moved']:>7}/{c['total']:<3}{mark}")
-        rprint("  [dim]composites (open these before choosing):[/dim]")
+        rprint("  [dim]overlay images (open these before choosing):[/dim]")
         for i, c in enumerate(cands):
             rprint(f"  [dim]  [{i}] {c.get('composite') or '(write failed)'}[/dim]")
         rprint(f"  global: [cyan]{res['global_tag']}[/cyan] (r={res['radius_um']}um)  |  "
@@ -451,8 +451,11 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
         if sev == 2:
             rprint("  [red]↳ top pick is RED-FLAGGED — inspect the overlay before accepting.[/red]")
         best = cands[0]
-        rprint(f"  [green]Suggested → row 0:[/green] {best['local_tag']}")
-        rprint("  Press [green]Enter[/green] to accept, or type a row # / local_tag to override:")
+        rows = ", ".join(str(i) for i in range(len(cands)))
+        rprint(f"  [green]Suggested: row 0[/green] ({best['local_tag']})")
+        rprint("  Open the overlay images above. Press [green]Enter[/green] to accept the "
+               "suggested registration.")
+        rprint(f"  Otherwise, enter a row # ({rows}) to override:")
         chosen_cand = _resolve_candidate(input().strip(), cands)
         chosen[str(rnd)] = chosen_cand['tag']
         rprint(f"  [green]selected[/green] HCR{rnd}: {chosen_cand['tag']}")
@@ -478,9 +481,11 @@ def _choose_global_interactive(rnd, ref, gtable, sug):
     Exists because the coarse metrics genuinely disagree: MI, mutual-inlier count and residual
     can each favour a different radius, and MI is the tiebreak only by convention. Whoever is
     looking at the overlays gets the last word."""
-    rprint(f"      [green]Suggested → row {sug}[/green] ({int(gtable[sug]['radius_um'])}µm). "
-           f"Open the composites above, then press [green]Enter[/green] to accept, "
-           f"or type a row # / radius to override:")
+    rows = ", ".join(str(i) for i in range(len(gtable)))
+    rprint(f"      [green]Suggested: row {sug}[/green] ({int(gtable[sug]['radius_um'])}µm)")
+    rprint("      Open the overlay images above. Press [green]Enter[/green] to accept the "
+           "suggested registration.")
+    rprint(f"      Otherwise, enter a row # ({rows}) to override:")
     return _resolve_global(input().strip(), gtable, sug)
 
 
