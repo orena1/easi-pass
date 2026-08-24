@@ -11,23 +11,56 @@ try:
     from easipass import importers as im
     from easipass.meta import rprint
 except ImportError as exc:
-    # Each easipass module falls back to a flat import so it can also be used
-    # from a notebook. That fallback masks the real cause: a missing
-    # third-party package surfaces as "No module named 'registrations'" (or
-    # 'functional', or 'meta'), which are internal modules, not the problem.
-    raise SystemExit(
-        f"EASI-PASS could not import its modules: {exc}\n"
-        "\n"
-        "If the name above is an easipass module (registrations, functional, meta,\n"
-        "segmentation, tiling), it is misleading -- a dependency underneath is what\n"
-        "actually failed. Install the package and its dependencies with:\n"
-        "\n"
-        "    pip install -e .\n"
-        "\n"
-        "and check which dependency is missing with:\n"
-        "\n"
-        '    python -c "import zarr, sbxreader, suite2p, bigstream, SimpleITK, sklearn, numba"\n'
-    ) from exc
+    # Each easipass module falls back to a flat import so it can also be used from a
+    # notebook. That fallback masks the real cause: a missing third-party package
+    # surfaces as "No module named 'registrations'" (or 'functional', or 'meta'),
+    # which are internal modules and not the problem. Work out what is actually
+    # absent and say so, rather than handing the user another command to run.
+    import os
+    import sys
+    import importlib.util
+
+    _REQUIRED = ['numpy', 'scipy', 'pandas', 'skimage', 'tifffile', 'cv2', 'SimpleITK',
+                 'cellpose', 'matplotlib', 'hjson', 'zarr', 'h5py', 'sklearn', 'numba',
+                 'dask', 'bigstream', 'ClusterWrap', 'sbxreader', 'suite2p', 'fastremap']
+    _missing = [m for m in _REQUIRED if importlib.util.find_spec(m) is None]
+    _env = os.environ.get('CONDA_DEFAULT_ENV') or os.environ.get('VIRTUAL_ENV') or '(none)'
+
+    _lines = ["EASI-PASS could not start: %s" % exc, ""]
+    if len(_missing) > 3:
+        # Wholesale absence: this is the wrong interpreter, not a broken install.
+        _lines += [
+            "Nothing is installed in this environment, so this is almost certainly the",
+            "wrong one. Active environment: %s" % _env,
+            "",
+            "    conda env list          # the active environment is marked with *",
+            "    conda activate easipass",
+            "",
+            "If you have not installed EASI-PASS yet, from the repository root:",
+            "",
+            "    conda env create -f environment.yml",
+            "    conda activate easipass",
+            "    pip install -e .",
+        ]
+    elif _missing:
+        _lines += [
+            "Active environment: %s" % _env,
+            "Missing dependencies: %s" % ", ".join(_missing),
+            "",
+            "Reinstall them with, from the repository root:",
+            "",
+            "    pip install -e .",
+        ]
+    else:
+        _lines += [
+            "Every dependency is importable, so this is not a missing package.",
+            "Active environment: %s" % _env,
+            "Interpreter: %s" % sys.executable,
+            "",
+            "Run from the repository root, so that the easipass package next to",
+            "master_pipeline.py is the one that gets imported.",
+        ]
+    raise SystemExit("\n".join(_lines) + "\n") from exc
 
 # This is the main pipeline script that runs the entire pipeline
 
