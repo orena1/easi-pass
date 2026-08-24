@@ -271,8 +271,8 @@ Everything lands under `{base_path}/{sample_name}/OUTPUT/`, alongside your input
 ```
 OUTPUT/
 ├── HCR/
-│   ├── full_registered_stacks/   rounds warped into the reference frame
 │   ├── cellpose/                 3D FISH masks
+│   ├── cellpose_aligned/         those masks warped into the reference frame
 │   └── extract_intensities/      per-cell fluorescence per channel
 ├── 2P/
 │   ├── cellpose/                 2D functional masks

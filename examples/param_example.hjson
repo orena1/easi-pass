@@ -40,6 +40,14 @@ HCR_selected_registrations:{
     ]
 }
 
+// Write each FISH round warped into the reference frame, under
+// OUTPUT/HCR/full_registered_stacks/. Off by default and read by nothing: probe
+// intensities are measured on the acquired, un-warped rounds and matching runs on
+// the aligned label volumes. Turn it on to look at the rounds superimposed, but
+// treat the result as pictures -- warping resamples the signal, which is why
+// quantification does not use it. Costs one warp per channel per round.
+export_warped_rounds:false
+
 // 2P -> HCR registration: commonly tuned knobs.
 // Lower-tier params (RANSAC, FFT-IoU thresholds, coarse-match patches) are read
 // from this same block but fall through to defaults if not specified.

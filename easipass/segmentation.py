@@ -1265,7 +1265,7 @@ def align_masks(full_manifest: dict,
     round_to_rounds, reference_round, register_rounds = verify_rounds(full_manifest, parse_registered = True, 
                                                                     print_rounds = False, print_registered = False)
     
-    reference_round_tiff = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
+    reference_round_tiff = Path(reference_round['image_path'])
     # Cross-round matching runs in the HCR01 frame, so read the reference-aligned masks.
     reference_round_masks = output_root(full_manifest) / 'HCR' / 'cellpose_aligned' / f"HCR{reference_round['round']}_masks.tiff"
 

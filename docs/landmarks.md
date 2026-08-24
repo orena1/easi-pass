@@ -15,15 +15,16 @@ to save to, then waits:
 
 ```
 Moving: .../OUTPUT/2P/registered/hires_stitched_plane0_rotated.tiff
-Target: .../OUTPUT/HCR/full_registered_stacks/HCR1.tiff
+Target: .../JS078_demo/HCR/JS078_demo_HCR01.tiff
 ```
 
-Both files already exist at that point. The moving image is intensity data, not masks, and
+Both files already exist at that point: the target is your acquired reference
+volume, read where it is. The moving image is intensity data, not masks, and
 segmentation has not run yet, which is deliberate: a bad alignment shows up before you
 spend time on Cellpose.
 
 Save to the path the prompt names. It follows this pattern, under
-`{base_path}/{mouse_name}/OUTPUT/2P/registered/`:
+`{base_path}/{sample_name}/OUTPUT/2P/registered/`:
 
 | Mode | Filename |
 |---|---|

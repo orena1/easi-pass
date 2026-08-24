@@ -197,18 +197,65 @@ def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
     # register the rounds
 
 def registration_apply(full_manifest):
-    """Materialise the reference round's full stack for the 2P->HCR step.
+    """Optionally write every FISH round warped into the reference frame.
 
-    HCR intensities are measured on the acquired (un-warped) rounds and mask
-    alignment is handled by align_masks_to_reference, so no per-channel probe
-    warp is produced — only the reference round is copied into
-    full_registered_stacks/, which the 2P->HCR registration reads."""
-    _, reference_round, _ = verify_rounds(full_manifest, parse_registered=True, print_rounds=True, print_registered=True)
+    Off unless params.export_warped_rounds is true, because nothing in the
+    pipeline reads these: probe intensities are measured on the acquired,
+    un-warped rounds, and matching runs on the label volumes in
+    cellpose_aligned/. They exist so you can look at the rounds superimposed --
+    for QC and for figures.
 
-    reference_round_full_stack_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
-    if not reference_round_full_stack_path.exists():
-        reference_round_full_stack_path.parent.mkdir(exist_ok=True, parents=True)
-        shutil.copyfile(reference_round['image_path'], reference_round_full_stack_path)
+    Warping resamples the signal, which is exactly why quantification does not
+    use it, so treat these as pictures rather than as data.
+    """
+    params = parse_json(full_manifest['manifest_path'])['params']
+    if not params.get('export_warped_rounds', False):
+        return
+
+    round_to_rounds, reference_round, register_rounds = verify_rounds(
+        full_manifest, parse_registered=True, print_rounds=False,
+        print_registered=False, func='export-warped')
+    ref = reference_round['round']
+    out_dir = output_root(full_manifest) / 'HCR' / 'full_registered_stacks'
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # The reference round defines the frame, so it is already aligned.
+    ref_out = out_dir / f"HCR{ref}.tiff"
+    if not ref_out.exists():
+        shutil.copyfile(reference_round['image_path'], ref_out)
+
+    pending = [r for r in register_rounds
+               if not (out_dir / f"{get_round_folder_name(r, ref)}.tiff").exists()]
+    if not pending:
+        return
+
+    rprint(f"[bold]Exporting {len(pending)} warped round(s) to full_registered_stacks/[/bold] "
+           "[dim](params.export_warped_rounds)[/dim]")
+
+    ref_vol = tif_imread(reference_round['image_path'])
+    n_z, n_y, n_x = ref_vol.shape[0], ref_vol.shape[2], ref_vol.shape[3]
+    # Only the grid shape matters here; the values are never read.
+    fix_grid = ref_vol[:, 0].transpose(2, 1, 0).astype(np.float32)
+
+    for HCR_round in pending:
+        name = get_round_folder_name(HCR_round, ref)
+        vol = tif_imread(round_to_rounds[HCR_round]['image_path'])
+        tx = _load_round_transform(full_manifest, HCR_round, round_to_rounds, reference_round)
+        n_c = vol.shape[1]
+        warped = np.zeros((n_z, n_c, n_y, n_x), dtype=vol.dtype)
+        for c in range(n_c):
+            write_path = tx['reg_path'] / f'warped_channel{c}.zarr'
+            shutil.rmtree(write_path, ignore_errors=True)
+            with cluster_constructor() as _clu:
+                out_zarr = distributed_apply_transform(
+                    fix_grid, vol[:, c].transpose(2, 1, 0).astype(np.float32),
+                    tx['fix_sp'], tx['mov_sp'], transform_list=[tx['affine'], tx['deform']],
+                    blocksize=tx['blocksize'], overlap=0, mov_margin=tx['mov_margin'],
+                    cluster=_clu, write_path=write_path, interpolator='1')
+            warped[:, c] = np.asarray(out_zarr).transpose(2, 1, 0).astype(vol.dtype)
+            shutil.rmtree(write_path, ignore_errors=True)
+        tif_imwrite(out_dir / f"{name}.tiff", warped, imagej=True)
+        rprint(f"  {name}: {n_c} channel(s) warped into the HCR{ref} frame")
 
 
 def _load_round_transform(full_manifest, HCR_round, round_to_rounds, reference_round):
@@ -326,22 +373,18 @@ def verify_rounds(full_manifest, parse_registered = False, print_rounds = False,
 
 
 def publish_reference_round(full_manifest):
-    """Copy the reference HCR round into full_registered_stacks and return its path.
+    """Resolve the reference FISH volume and return its path.
 
-    Both the 2P->HCR landmark placement and the cascade that follows read the
-    reference volume from here, and it is the acquired volume verbatim -- no
-    segmentation, no round-to-round warp. Publishing it separately lets the manual
-    landmark work happen before any cellpose runs. Idempotent; register_rounds
-    calls it too, so the ordering in master_pipeline is free to change.
+    The 2P->HCR landmark placement and the cascade that follows both read the
+    reference volume, and it is the acquired file verbatim -- no segmentation, no
+    round-to-round warp -- so they read it where it already is. This used to copy
+    it into full_registered_stacks/ to give BigWarp a predictable path; the copy
+    duplicated a whole volume per sample and the prompt prints the path anyway.
+    Resolving here keeps the call site, so the ordering in master_pipeline is
+    still free to change.
     """
     _, reference_round, _ = verify_rounds(full_manifest, func='publish-reference')
-    path = (output_root(full_manifest) / 'HCR' / 'full_registered_stacks'
-            / f"HCR{reference_round['round']}.tiff")
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(reference_round['image_path'], path)
-        rprint(f"[green]✓ Reference round HCR{reference_round['round']} ready in full_registered_stacks[/green]")
-    return path
+    return Path(reference_round['image_path'])
 
 
 def register_rounds(full_manifest):
@@ -460,10 +503,18 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
     rprint("[bold]Computing centroid global + local registration (this runs the real pipeline; "
            "may take a while per round)...[/bold]")
     results = run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round,
-                                            gcfg, lcfg, ds, choose_global=_choose_global_interactive)
+                                            gcfg, lcfg, ds, choose_global=_choose_global_interactive,
+                                            confirm_overwrite=_confirm_round_overwrite)
 
     chosen = {}   # round -> "global_tag/local_tag"
     for rnd, res in results.items():
+        if res.get('skipped'):
+            # Kept by the user at the overwrite gate: carry its existing selection forward so the
+            # apply step still runs, and don't re-ask either review question for it.
+            chosen[str(rnd)] = res['tag']
+            rprint(f"\n[bold]HCR{rnd} → HCR{reference_round['round']}[/bold] — kept existing "
+                   f"registration: [cyan]{res['tag']}[/cyan]")
+            continue
         cands = res.get('candidates', [])
         if not cands:
             rprint(f"[red]HCR{rnd}: no local candidates produced — skipping (check masks/logs)[/red]")
@@ -510,6 +561,28 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
     verify_rounds(full_manifest, parse_registered=True, print_registered=True)
     registration_apply(full_manifest)
     rprint("\n[green]✅ Registration applied[/green]")
+
+
+def _confirm_round_overwrite(rnd, ref, done):
+    """Ask before recomputing a round that is ALREADY registered. True = redo it and overwrite,
+    False = keep what's there and move to the next round.
+
+    Called before that round's masks are loaded, so answering "keep" costs nothing: a re-run
+    previously repeated the full ~15 min deform and re-asked both review questions for every
+    finished round, with no way to say "that one's done, move on"."""
+    rprint(f"  [yellow]Already registered[/yellow] ([dim]{done['when']}[/dim]): "
+           f"[cyan]{done['tag']}[/cyan]")
+    rprint(f"  [dim]{done['dir']}[/dim]")
+    rprint("    y = re-run and overwrite above outputs")
+    rprint("    n = skip, keep above outputs")
+    flush_input()   # a stray Enter here must not silently trigger a 15-minute recompute
+    # Neither answer is a default, so keep asking until one is given -- same loop as
+    # registrations_utils.check_overwrite, which asks this question for the 2P planes.
+    while True:
+        resp = input("  input [y/n]: ").strip().lower()
+        if resp in ('y', 'n'):
+            return resp == 'y'
+        rprint("    [yellow]Please enter y or n[/yellow]")
 
 
 def _choose_global_interactive(rnd, ref, gtable, sug):
@@ -966,8 +1039,8 @@ def ensure_twop_to_hcr_landmarks(full_manifest, has_hires, reference_plane,
 
     Split out of twop_to_hcr_registration so the manual placement can happen before
     any segmentation runs. Both images BigWarp opens are intensity data that exists
-    straight out of the per-plane prep: the acquired HCR volume copied by
-    publish_reference_round, and the rotated 2P mean (or the stitched hi-res image).
+    straight out of the per-plane prep: the acquired FISH volume itself, and the
+    rotated 2P mean (or the stitched hi-res image).
     Nothing here reads cellpose output -- the masks are consumed by the cascade
     downstream, once the landmarks exist.
 
@@ -977,8 +1050,9 @@ def ensure_twop_to_hcr_landmarks(full_manifest, has_hires, reference_plane,
     if reference_round is None:
         _, reference_round, _ = verify_rounds(full_manifest, func='landmark-check')
 
-    hcr_ref_round_path = (output_root(full_manifest) / 'HCR' / 'full_registered_stacks'
-                          / f"HCR{reference_round['round']}.tiff")
+    # The acquired reference volume, read where it already lives. This is one of
+    # the two images BigWarp opens; the prompt below prints the full path.
+    hcr_ref_round_path = Path(reference_round['image_path'])
     landmarks_dir = output_root(full_manifest) / '2P' / 'registered'
     # Reference round number for file naming (strip leading zeros: "01" -> "1")
     hcr_ref = str(int(reference_round['round']))
@@ -1173,7 +1247,7 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
 
     # HCR paths. The masks are only read further down, after the landmarks are in
     # hand -- see ensure_twop_to_hcr_landmarks for why that matters.
-    hcr_ref_round_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
+    hcr_ref_round_path = Path(reference_round['image_path'])
     hcr_ref_masks_path = output_root(full_manifest) / 'HCR' / 'cellpose_aligned' / f"HCR{reference_round['round']}_masks.tiff"
 
     landmarks_path, landmarks_source, twop_ref_image_path = ensure_twop_to_hcr_landmarks(

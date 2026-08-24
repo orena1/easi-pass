@@ -43,6 +43,7 @@ that affine): the caller passes a `choose_global` callback that is invoked once 
 composites are written. Leave it None for unattended runs -> the suggestion is taken.
 
 """
+import time
 import shutil
 import hashlib
 import contextlib
@@ -51,11 +52,13 @@ from pathlib import Path
 from tifffile import imread as tif_imread, imwrite as tif_imwrite
 
 try:
-    from .meta import rprint, output_root, get_hcr_to_hcr_registration_config, get_round_folder_name
+    from .meta import (rprint, output_root, get_hcr_to_hcr_registration_config,
+                       get_round_folder_name, parse_json)
     from .registrations_utils import resolve_hcr_resolution
     from .bigstream_functions import get_registration_score
 except ImportError:  # running in a notebook / as a flat module
-    from meta import rprint, output_root, get_hcr_to_hcr_registration_config, get_round_folder_name
+    from meta import (rprint, output_root, get_hcr_to_hcr_registration_config,
+                       get_round_folder_name, parse_json)
     from registrations_utils import resolve_hcr_resolution
     from bigstream_functions import get_registration_score
 
@@ -717,10 +720,53 @@ def _assess_local(best, global_med):
 
 
 # --------------------------------------------------------------------------- #
+#  ALREADY-REGISTERED DETECTION
+#  A re-run used to repeat every round from scratch -- reloading ~1GB of masks, re-sweeping
+#  the coarse radii, re-asking both review questions and recomputing a ~15 min deform -- even
+#  when that round was already finished and recorded. These let the driver notice and ask
+#  before overwriting. Deliberately cheap: one manifest read + two stat calls, no image IO.
+# --------------------------------------------------------------------------- #
+def _norm_round(r):
+    """'02' and 2 name the same round; compare them on equal terms."""
+    return str(r).strip().lstrip('0') or '0'
+
+
+def _selected_tag(full_manifest, rnd):
+    """The 'global_tag/local_tag' this round is currently registered with, per the manifest's
+    HCR_selected_registrations, or None."""
+    try:
+        sel = parse_json(full_manifest['manifest_path'])['params'].get('HCR_selected_registrations') or {}
+        for r in sel.get('rounds', []):
+            if _norm_round(r.get('round')) == _norm_round(rnd):
+                regs = r.get('selected_registrations') or []
+                return regs[0] if regs else None
+    except Exception:
+        pass          # unreadable/absent block -> treat as "not registered yet"
+    return None
+
+
+def completed_round(full_manifest, out_root, rfolder, rnd):
+    """Return {tag, dir, when} when this round already has a FINISHED registration, else None.
+
+    'Finished' = the manifest names a selected tag AND that folder holds both products the
+    apply step consumes (deform.zarr + _affine.mat). A half-written candidate from an
+    interrupted run has no manifest entry, so it correctly does not count as done.
+    """
+    tag = _selected_tag(full_manifest, rnd)
+    if not tag:
+        return None
+    d = out_root / 'registrations' / rfolder / Path(tag)
+    if not ((d / 'deform.zarr').exists() and (d / '_affine.mat').exists()):
+        return None
+    return dict(tag=tag, dir=str(d),
+                when=time.strftime('%Y-%m-%d %H:%M', time.localtime((d / '_affine.mat').stat().st_mtime)))
+
+
+# --------------------------------------------------------------------------- #
 #  DRIVER
 # --------------------------------------------------------------------------- #
 def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds,
-                                  choose_global=None):
+                                  choose_global=None, confirm_overwrite=None):
     """Compute global+local centroid registration for every mov round, write candidates into
     the existing registrations/ layout, and return a per-round ranked summary:
 
@@ -737,6 +783,11 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
     answer with an index. Leave it None (notebooks, sweeps, unattended runs) to take the suggestion.
     The coarse pick is asked BEFORE the fine stage because the deform is seeded by that affine and
     is the expensive step -- picking after the fact would mean recomputing it.
+
+    `confirm_overwrite(rnd, ref, done) -> bool` is called for any round that is ALREADY registered
+    (see completed_round), before its masks are loaded. Return False to keep the existing outputs
+    and move on; that round comes back as {'skipped': True, 'tag': <existing>} so the caller can
+    carry its selection forward unchanged. Leave it None to recompute every round unconditionally.
 
     Selection of the fine winner + manifest write-back is done by the caller (register_rounds).
     """
@@ -755,6 +806,18 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
     for ri, (rnd, mov_round) in enumerate(round_to_rounds.items(), 1):
         rprint(f"\n[bold cyan]── HCR{rnd} → HCR{ref}  ({ri}/{len(round_to_rounds)}) "
                f"{'─' * max(0, 40 - len(str(rnd)) - len(str(ref)))}[/bold cyan]")
+        rfolder = get_round_folder_name(rnd, ref)
+
+        # Ask BEFORE overwriting a round that is already registered, and before the expensive
+        # mask load. Answering "keep" leaves every output untouched and moves to the next round.
+        done = completed_round(full_manifest, out_root, rfolder, rnd)
+        if done is not None and confirm_overwrite is not None and not confirm_overwrite(rnd, ref, done):
+            rprint(f"  [green]kept existing registration[/green] — nothing recomputed")
+            results[rnd] = dict(skipped=True, tag=done['tag'], dir=done['dir'],
+                                global_tag=done['tag'].split('/')[0], candidates=[],
+                                severity=0, flags=[])
+            continue
+
         fix_mask = cellpose_dir / f"{get_round_folder_name(ref, ref)}_masks.tiff"
         # mov mask MUST be the NATIVE (unregistered) frame. The canonical
         # cellpose/{round_folder}_masks.tiff is native on most mice, but on some cp4 mice
@@ -779,8 +842,6 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
                    f"mov {my}×{mx}×{mz} ([b]{nmov}[/b] nuclei)")
 
             # ---- GLOBAL (sweep radii; EVERY one persisted, then suggested/chosen) ----
-            rfolder = get_round_folder_name(rnd, ref)
-
             def _emit_global(row, aligned, _rf=rfolder):
                 """Persist one coarse candidate the moment it is scored: its own _affine.mat dir
                 (so it is selectable later) + a QC composite reusing the MI warp. Stamps the paths
