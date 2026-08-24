@@ -77,6 +77,13 @@ def parse_json(json_file):
     """
     with open(json_file, 'r') as f:
         manifest = hjson.load(f)
+
+    # `sample_name` is the general spelling; `mouse_name` is what the lab's
+    # manifests use and what the code reads throughout. Accept either.
+    data = manifest.get('data', {})
+    if 'sample_name' in data and 'mouse_name' not in data:
+        data['mouse_name'] = data['sample_name']
+
     bp = manifest.get('data', {}).get('base_path')
     if isinstance(bp, str):
         bp = bp.replace('\\', '/')

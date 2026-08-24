@@ -2,8 +2,8 @@
     // EASI-PASS — start here. Copy, edit the paths, run:
     //   python master_pipeline.py --manifest your_file.hjson
     //
-    // Inputs:  {base_path}/{mouse_name}/2P/plane_{N}.tiff
-    //          {base_path}/{mouse_name}/HCR/{mouse_name}_HCR{R}.tiff   (one per round)
+    // Inputs:  {base_path}/{sample_name}/2P/plane_{N}.tiff
+    //          {base_path}/{sample_name}/HCR/HCR{R}.tiff   (one per round)
     //
     // Add --check_alignment to stop after matching 2P to the reference round;
     // later rounds need not exist yet. Re-run without it to finish.
@@ -15,7 +15,7 @@
 
     data: {
         base_path: "/mnt/nasquatch/data/2p/YOUR_LAB/EASI_FISH/pipeline"
-        mouse_name: "MOUSE001"
+        sample_name: "MOUSE001"
 
         two_photon_imaging: {
             sessions: [

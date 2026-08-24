@@ -121,14 +121,25 @@ def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
     """
 
     mov_rounds = []
-    reference_round_number = manifest['HCR_confocal_imaging']['reference_round']
+    sample = manifest['mouse_name']
+    ref = manifest['HCR_confocal_imaging']['reference_round']
+    reference_round_number = ref
+    hcr_dir = Path(manifest['base_path']) / sample / 'HCR'
+    # The sample-name prefix is optional: the file already lives in {sample}/HCR/,
+    # so requiring it means renaming every volume on the way in, and renaming them
+    # again if the folder is ever renamed. Stems are tried in order, so a
+    # registered file still wins over an acquired one of the same round.
     for i in manifest['HCR_confocal_imaging']['rounds']:
-        if i['round'] == reference_round_number:
-            reference_round = _resolve_hcr_path(Path(manifest['base_path']) / manifest['mouse_name'] / 'HCR' / f"{manifest['mouse_name']}_HCR{reference_round_number}.tiff")
+        if i['round'] == ref:
+            reference_round = _resolve_hcr_path(
+                hcr_dir / f"{sample}_HCR{ref}.tiff",
+                alt_stems=(f"HCR{ref}",))
         else:
             mov_rounds.append(_resolve_hcr_path(
-                Path(manifest['base_path']) / manifest['mouse_name'] / 'HCR' / f"{manifest['mouse_name']}_HCR{i['round']}_to_HCR{reference_round_number}.tiff",
-                alt_stems=(f"{manifest['mouse_name']}_HCR{i['round']}",)))
+                hcr_dir / f"{sample}_HCR{i['round']}_to_HCR{ref}.tiff",
+                alt_stems=(f"{sample}_HCR{i['round']}",
+                           f"HCR{i['round']}_to_HCR{ref}",
+                           f"HCR{i['round']}")))
     
     while True:
         missing_files = []

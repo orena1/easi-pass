@@ -78,22 +78,26 @@ let you check intermediate output; `demo/README.md` gives the answers.
    [`param_example.hjson`](examples/param_example.hjson) documents every tunable option in
    `params`. It is a reference to copy settings out of, not a starting point — it has no
    `data` section.
-2. Set `base_path` and `mouse_name` at the top of your manifest, then put your files here.
+2. Set `base_path` and `sample_name` at the top of your manifest, then put your files here.
    These are the only inputs; everything under `OUTPUT/` is created for you.
 
    ```
-   {base_path}/{mouse_name}/
+   {base_path}/{sample_name}/
    ├── 2P/
-   │   ├── plane_0.tiff               your functional mean image, one per plane
-   │   └── plane_0_hires.tiff         optional, and must already be stitched
+   │   ├── plane_0.tiff        your functional mean image, one per plane
+   │   └── plane_0_hires.tiff  optional, and must already be stitched
    └── HCR/
-       ├── {mouse_name}_HCR01.tiff    reference round
-       └── {mouse_name}_HCR02.tiff    any further rounds
+       ├── HCR01.tiff          reference round
+       └── HCR02.tiff          any further rounds
    ```
 
-   The numbers have to line up: `{N}` in `plane_{N}.tiff` matches an entry in
-   `functional_planes`, and `{R}` in `_HCR{R}.tiff` matches a `round` value. `.tif` and
-   `.tiff` both work, and case is ignored.
+   Only the numbers have to line up: `{N}` in `plane_{N}.tiff` matches an entry in
+   `functional_planes`, and `{R}` in `HCR{R}.tiff` matches a `round` value. `.tif` and
+   `.tiff` both work and case is ignored, so `hcr01.TIF` is fine.
+
+   A `{sample_name}_` prefix on the FISH files is also accepted, since that is what the
+   pipeline writes once rounds are registered. `mouse_name` works as a synonym for
+   `sample_name`.
 
 3. Run:
 
@@ -195,7 +199,7 @@ syntax. It has two top-level sections: `data` (what you're processing) and `para
 | Field | Description |
 |---|---|
 | `base_path` | Root directory holding your experiment folders |
-| `mouse_name` | Folder name for this experiment. **Outputs are written under this name** |
+| `sample_name` | Folder name for this sample. **Outputs are written under this name.** `mouse_name` is accepted as a synonym |
 | `HCR_confocal_imaging.rounds` | One entry per FISH round: round id, channel names, voxel resolution |
 | `HCR_confocal_imaging.reference_round` | The round all others register to. Pick the one with the best signal |
 | `two_photon_imaging.sessions` | Functional session config. Omit entirely for FISH-only runs |
@@ -262,7 +266,7 @@ The image must already be stitched.
 
 ## What the pipeline writes
 
-Everything lands under `{base_path}/{mouse_name}/OUTPUT/`, alongside your inputs:
+Everything lands under `{base_path}/{sample_name}/OUTPUT/`, alongside your inputs:
 
 ```
 OUTPUT/

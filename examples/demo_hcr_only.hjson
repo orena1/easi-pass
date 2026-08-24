@@ -2,14 +2,14 @@
     // EASI-PASS — FISH rounds only, no functional data. Copy, edit the paths, run:
     //   python master_pipeline.py --manifest your_file.hjson
     //
-    // Inputs:  {base_path}/{mouse_name}/HCR/{mouse_name}_HCR{R}.tiff   (one per round)
+    // Inputs:  {base_path}/{sample_name}/HCR/HCR{R}.tiff   (one per round)
     //
     // Rounds are registered to the reference, segmented, and matched to each other.
     // With no two_photon_imaging section, --only_hcr is inferred.
 
     data: {
         base_path: "/mnt/nasquatch/data/2p/YOUR_LAB/EASI_FISH/pipeline"
-        mouse_name: "MOUSE001"
+        sample_name: "MOUSE001"
 
         HCR_confocal_imaging: {
             rounds: [
