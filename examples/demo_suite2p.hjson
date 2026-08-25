@@ -8,7 +8,7 @@
     // Note Suite2p's folder is plane{N}; the tiff path uses plane_{N}.tiff.
 
     data: {
-        base_path: "/mnt/nasquatch/data/2p/YOUR_LAB/EASI_FISH/pipeline"
+        base_path: "/path/to/your/data"     // the folder that contains {sample_name}/
         sample_name: "MOUSE001"
 
         two_photon_imaging: {

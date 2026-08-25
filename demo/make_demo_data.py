@@ -27,7 +27,7 @@ What it does
    nothing is cropped -- landmark coordinates are already in the full frame.
 
 Run on any box that can see the full JS078 folder:
-    python make_demo_data.py --src /mnt/nasquatch/data/2p/jonna/EASI_FISH/pipeline/JS078 \
+    python make_demo_data.py --src /path/to/EASI_FISH/pipeline/JS078 \
                              --dst ./demo_pre_run/JS078_demo
 """
 import argparse

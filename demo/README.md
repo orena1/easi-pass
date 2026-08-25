@@ -91,7 +91,7 @@ signal is a 2P→HCR cascade `Final: IoU ~0.48` with an accepted small global sh
 (plane 0) and one HCR round (01) — assembled with:
 ```bash
 python make_demo_data.py \
-  --src /mnt/nasquatch/data/2p/jonna/EASI_FISH/pipeline/JS078 \
+  --src /path/to/EASI_FISH/pipeline/JS078 \
   --dst ./demo_pre_run/JS078_demo
 ```
 `demo_post_run/` is then produced by running the pipeline on `demo_pre_run/` and keeping

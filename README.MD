@@ -91,6 +91,20 @@ let you check intermediate output; `demo/README.md` gives the answers.
        └── HCR02.tiff          any further rounds
    ```
 
+   `base_path` is the folder that *contains* your samples, not the sample itself — so
+   several manifests can share one `base_path` and differ only by `sample_name`.
+   Worked example, for data at `/data/experiments/M12/`:
+
+   ```
+   base_path:   "/data/experiments"      ← the folder holding all your samples
+   sample_name: "M12"                    ← this one; outputs are written under it
+   ```
+   ```
+   /data/experiments/M12/2P/plane_0.tiff
+   /data/experiments/M12/HCR/HCR01.tiff
+   /data/experiments/M12/OUTPUT/         ← created by the pipeline
+   ```
+
    Only the numbers have to line up: `{N}` in `plane_{N}.tiff` matches an entry in
    `functional_planes`, and `{R}` in `HCR{R}.tiff` matches a `round` value. `.tif` and
    `.tiff` both work and case is ignored, so `hcr01.TIF` is fine.

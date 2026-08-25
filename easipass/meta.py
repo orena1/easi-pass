@@ -100,7 +100,7 @@ def parse_json(json_file):
     if isinstance(bp, str):
         bp = bp.replace('\\', '/')
         # Checked explicitly rather than with Path.is_absolute(): on Windows a
-        # POSIX path like /mnt/nasquatch/... has no drive and would be reported
+        # POSIX path like /mnt/data/... has no drive and would be reported
         # as relative, which would silently rewrite every lab manifest.
         is_absolute = bp.startswith('/') or (len(bp) > 1 and bp[1] == ':')
         if not is_absolute:

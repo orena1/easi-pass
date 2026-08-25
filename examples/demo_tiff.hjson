@@ -14,7 +14,7 @@
     // All tunable parameters are documented in param_example.hjson.
 
     data: {
-        base_path: "/mnt/nasquatch/data/2p/YOUR_LAB/EASI_FISH/pipeline"
+        base_path: "/path/to/your/data"     // the folder that contains {sample_name}/
         sample_name: "MOUSE001"
 
         two_photon_imaging: {

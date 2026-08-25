@@ -53,20 +53,14 @@ from tifffile import imwrite as tif_imwrite
 from tifffile import imread as tif_imread
 # RBFInterpolator/griddata now handled in registrations_utils.py
 
-# bigstream: prefer the pip-installed package (a core dependency).
-# Only if it isn't importable, fall back to a local checkout (lab dev machines),
-# adding the first path that actually exists.
+# bigstream is a core dependency, so the pinned fork installs with the package.
+# A checkout beside the working directory still wins if one is present, which is
+# how you test a local bigstream without reinstalling.
 import importlib.util
 if importlib.util.find_spec("bigstream") is None:
-    for _bs in (
-        os.path.join(os.getcwd(), "bigstream_v2_andermann"),
-        "/mnt/nasquatch/data/2p/jonna/Code_Python/Notebooks_Jonna/BigStream/bigstream_v2_andermann",
-        r"\\nasquatch\data\2p\jonna\Code_Python\Notebooks_Jonna\BigStream\bigstream_v2_andermann",
-        r"C:\Users\jonna\Notebooks_Jonna\BigStream\bigstream_v2_andermann",
-    ):
-        if os.path.exists(_bs):
-            sys.path.insert(0, _bs)
-            break
+    _bs = os.path.join(os.getcwd(), "bigstream_v2_andermann")
+    if os.path.exists(_bs):
+        sys.path.insert(0, _bs)
 
 from bigstream.piecewise_transform import distributed_apply_transform
 from ClusterWrap import cluster as cluster_constructor
