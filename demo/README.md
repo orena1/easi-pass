@@ -26,16 +26,13 @@ demo/
 │           ├── lowres_plane0_masks_in_hires_space.tiff       (2P placement in hi-res space)
 │           ├── lowres_meanImg_C0_plane0_rotated.tiff         (rotated 2P mean)
 │           └── hires_stitched_plane0_rotated.tiff            (rotated 2P hi-res)
-├── demo_post_run/         ← REFERENCE: a full, correct completion to compare against
-│   └── JS078_demo/OUTPUT/ (the whole output tree; fetch with --with-reference)
-└── completed/             ← the single golden matches CSV, tracked in git for a quick diff
+└── completed/             ← the golden matches table, tracked in git, to diff against
 ```
 
-You run the pipeline on **`demo_pre_run/`**, then compare your result against
-**`demo_post_run/`** (the full reference) or — for a quick check without the multi-GB
-download — against the small golden CSV in **`completed/`**. Only the text files and that
-golden CSV are tracked in git; the imaging data is attached to the GitHub release (see
-`fetch_demo_data.py`). Most users need only `demo_pre_run/`.
+You run the pipeline on **`demo_pre_run/`**, then compare your result against the golden
+table in **`completed/`** — 398 KB, tracked in git, so the check costs no download. Only
+the text files and that table are in the repo; the imaging data is a GitHub release asset
+fetched by `fetch_demo_data.py`.
 
 ## Prerequisites
 
@@ -51,8 +48,7 @@ Both commands run from the repository root. There is nothing to edit: the manife
 
 1. **Get the data:**
    ```bash
-   python demo/fetch_demo_data.py                   # the dataset you run on (demo_pre_run/)
-   python demo/fetch_demo_data.py --with-reference  # optional: the completed reference too
+   python demo/fetch_demo_data.py
    ```
 
 2. **Run the pipeline:**
@@ -94,10 +90,9 @@ python make_demo_data.py \
   --src /path/to/EASI_FISH/pipeline/JS078 \
   --dst ./demo_pre_run/JS078_demo
 ```
-`demo_post_run/` is then produced by running the pipeline on `demo_pre_run/` and keeping
-the resulting `OUTPUT/` tree (that is the reference users compare against). Build the two
-release archives from these folders as noted in `fetch_demo_data.py`, then attach them to
-a GitHub release and fill in `RELEASE_BASE` + the two SHA256s there.
+The golden table in `completed/` is the match CSV from a validated run of that data; it is
+what users diff against. Build the release archive as noted in `fetch_demo_data.py`, attach
+it to a GitHub release, and update `RELEASE_BASE` and the sha256 there.
 Everything is shipped at **full resolution and full frame** — the HCR volume is copied
 verbatim (~774 MB, all 5 gene channels, all 39 Z slices), and the BigWarp landmarks are
 copied verbatim (no coordinate shift, since nothing is cropped).

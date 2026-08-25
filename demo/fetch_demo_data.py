@@ -4,16 +4,13 @@ The demo's small text files (manifest, seed landmarks, expected output) live in 
 git repo. The imaging volumes are attached to a GitHub release and fetched here so
 the repo stays lightweight. There are two archives:
 
-  demo_pre_run   the fresh dataset you run the pipeline on (~350 MB zipped). This is
-                 all you need to run the demo. Fetched by default.
-  demo_post_run  a full, correct completion to compare your run against (~1.2 GB).
-                 Optional -- fetch with --with-reference. For a quick check without
-                 this download, compare against the golden CSV in completed/ instead.
+One archive, demo_pre_run (~350 MB zipped): the dataset you run the pipeline on.
+To check your result afterwards, diff it against the golden table tracked in
+demo/completed/ -- see demo/completed/README.md for the numbers to expect.
 
 Usage:
-    python fetch_demo_data.py                     # pre_run only (enough to run the demo)
-    python fetch_demo_data.py --with-reference    # also fetch the completed reference
-    python fetch_demo_data.py --force             # re-download even if data exists
+    python fetch_demo_data.py            # fetch the demo data
+    python fetch_demo_data.py --force    # re-download even if it is already there
 
 For maintainers -- to publish a new version of the demo data, rebuild the archive,
 attach it to a release, then bump RELEASE_BASE and the sha256 below. Rebuild from a
@@ -43,14 +40,6 @@ ARCHIVES = {
         "sha256": "1ac96d59bf7d52a522ac3ea0b963b15950b67c4d97c6c387407d863dccab011e",
         "marker": HERE / "demo_pre_run" / "JS078_demo" / "HCR" / "JS078_demo_HCR01.tiff",
     },
-    # Optional reference completion. Not published: the 398 KB golden CSV in
-    # completed/ answers the same question -- did my run come out right -- without
-    # a multi-gigabyte download.
-    "demo_post_run": {
-        "url": f"{RELEASE_BASE}/JS078_demo_post_run.zip",
-        "sha256": "PLACEHOLDER_SHA256_POST_RUN",
-        "marker": HERE / "demo_post_run" / "JS078_demo" / "OUTPUT" / "MERGED" / "aligned_masks" / "twop_plane0_to_HCR01.csv",
-    },
 }
 # ------------------------------------------------------------------------------
 
@@ -77,19 +66,6 @@ def fetch(name: str, spec: dict, force: bool):
     if spec["marker"].exists() and not force:
         print(f"{name}: already present (use --force to re-download).")
         return
-    if "OWNER/REPO" in spec["url"] or "PLACEHOLDER" in spec["sha256"]:
-        if name == "demo_post_run":
-            sys.exit(
-                "demo_post_run is not published: it is a multi-gigabyte copy of a finished\n"
-                "run, and demo/completed/twop_plane0_to_HCR01.csv answers the same question\n"
-                "-- did my run come out right -- in 398 KB. Compare against that instead.\n"
-                "See demo/completed/README.md for the numbers to expect."
-            )
-        sys.exit(
-            f"{name}: the release asset is not published yet.\n"
-            "Generate the data locally with make_demo_data.py, or check the repo's\n"
-            "releases page for a newer version of this script."
-        )
     archive = HERE / f"{name}.zip"
     print(f"{name}: downloading {spec['url']} ...")
     try:
@@ -118,14 +94,10 @@ def fetch(name: str, spec: dict, force: bool):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--with-reference", action="store_true",
-                    help="also fetch demo_post_run (the completed reference, ~1.2 GB)")
     ap.add_argument("--force", action="store_true", help="re-download even if data exists")
     args = ap.parse_args()
 
     fetch("demo_pre_run", ARCHIVES["demo_pre_run"], args.force)
-    if args.with_reference:
-        fetch("demo_post_run", ARCHIVES["demo_post_run"], args.force)
     print("\nNext, from the repository root:\n"
           "    python master_pipeline.py --manifest demo/JS078_demo.hjson")
 
