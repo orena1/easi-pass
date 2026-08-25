@@ -20,10 +20,33 @@ except ImportError as exc:
     import sys
     import importlib.util
 
+    # Keep this in sync with what easipass/*.py actually imports at module level. An omission
+    # here is not harmless: the package's flat-import fallbacks turn ANY failure inside a module
+    # into "No module named '<internal module>'", so a package missing from this list produces a
+    # message that names an internal module and sends the user looking in the wrong place.
+    # tqdm / pystackreg / distributed were missing until 2026-08-25 and did exactly that.
     _REQUIRED = ['numpy', 'scipy', 'pandas', 'skimage', 'tifffile', 'cv2', 'SimpleITK',
-                 'cellpose', 'matplotlib', 'hjson', 'zarr', 'h5py', 'sklearn', 'numba',
-                 'dask', 'bigstream', 'ClusterWrap', 'sbxreader', 'suite2p', 'fastremap']
+                 'cellpose', 'matplotlib', 'hjson', 'zarr', 'sklearn', 'numba',
+                 'dask', 'distributed', 'bigstream', 'ClusterWrap', 'sbxreader', 'suite2p',
+                 'tqdm', 'pystackreg']
     _missing = [m for m in _REQUIRED if importlib.util.find_spec(m) is None]
+
+    # If the failure names one of OUR OWN modules, a flat-import fallback fired and the real
+    # cause is hidden. Import the leaf modules directly, in dependency order, to surface it --
+    # meta and registrations_utils have the fewest fallbacks, so the true error appears there.
+    _INTERNAL = {'meta', 'registrations', 'registrations_utils', 'registrations_landmarks',
+                 'functional', 'tiling', 'segmentation', 'importers', 'automation',
+                 'auto_stitching', 'bigstream_functions', 'somaprint', 'somaprint_hcr',
+                 'hcr_centroid_registration', 'analysis_utils'}
+    _real = None
+    if getattr(exc, 'name', None) in _INTERNAL:
+        for _leaf in ('easipass.meta', 'easipass.registrations_utils', 'easipass.registrations',
+                      'easipass.functional', 'easipass.tiling', 'easipass.segmentation'):
+            try:
+                importlib.import_module(_leaf)
+            except Exception as _e2:          # noqa: BLE001 - reporting, not handling
+                _real = f"{_leaf}: {type(_e2).__name__}: {_e2}"
+                break
     _env = os.environ.get('CONDA_DEFAULT_ENV') or os.environ.get('VIRTUAL_ENV') or '(none)'
 
     _lines = ["EASI-PASS could not start: %s" % exc, ""]
@@ -48,6 +71,23 @@ except ImportError as exc:
             "Missing dependencies: %s" % ", ".join(_missing),
             "",
             "Reinstall them with, from the repository root:",
+            "",
+            "    pip install -e .",
+        ]
+    elif _real:
+        # Everything on the list is present, but an internal module still failed to import. The
+        # message above names an internal module only because a fallback fired; this is the cause.
+        _lines += [
+            "Active environment: %s" % _env,
+            "Interpreter: %s" % sys.executable,
+            "",
+            "The name above is one of EASI-PASS's own modules, which means the real error was",
+            "masked by a flat-import fallback. The actual failure is:",
+            "",
+            "    %s" % _real,
+            "",
+            "If that names a third-party package, install it and add it to _REQUIRED in",
+            "master_pipeline.py so the next person gets told directly:",
             "",
             "    pip install -e .",
         ]

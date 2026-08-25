@@ -1938,6 +1938,13 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
         dst_z = orig_landmarks[7].values if orig_landmarks.shape[1] > 7 else np.zeros(len(orig_landmarks))
 
     prefix = "hires_stitched_" if has_hires else ""
+    # Both of these used to be inherited from the landmark-resolution code that ran
+    # earlier in this same function. That code is now ensure_twop_to_hcr_landmarks,
+    # so they have to be rebuilt here -- the automation block below writes
+    # {prefix}plane{N}_to_HCR{ref}_auto.csv and needs the same directory and the
+    # same zero-stripped round number the landmark filenames use.
+    landmarks_dir = output_root(full_manifest) / '2P' / 'registered'
+    hcr_ref = str(int(reference_round['round']))
     hcr_res_x, hcr_res_y, hcr_res_z = hcr_resolution[0], hcr_resolution[1], hcr_resolution[2]
 
     for plane in TARGET_PLANES:

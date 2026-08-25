@@ -91,7 +91,20 @@ _LOCAL_DEFAULTS = dict(
     context_radius=[12, 12, 2],      # voxels (current local style)
     context_radius_um=None,          # OPT-IN: global-style um window for blocks (experiment knob)
     match_threshold=0.3,
-    max_spot_match_distance_um=60.0,
+    # Hard cap on the distance between a paired fix/mov centroid. Below the true local
+    # displacement it rejects EVERY candidate pair, the block fails match_floor, and it returns
+    # identity -- silently, with no error. Raised 60 -> 200 on 2026-08-25: PS527_04 HCR03 carried a
+    # ~90um (p95 113um) regional shift that the old 60 cost entirely, leaving 20/90 quadrant blocks
+    # dead. At 175um that region went from 12.8% to 51.4% mutual-NN inliers and residual scatter
+    # 10.4 -> 5.4um, with the already-good region UNCHANGED (5.47 -> 5.44um) and no runtime cost
+    # (4 min either way). See figure_notebooks/figure_3_matching/regional_registration_failure_*.
+    #
+    # 200 is the useful ceiling for the default blocksize, not an arbitrary round number: with
+    # overlap=0.5 blocks step by B/2, so a pair separated by d shares a block only when B >= 2d
+    # (brute-force verified). blocksize 200px at 1.2626um/px caps recoverable d at ~126um, so a
+    # cap much above ~200 buys reach the block cannot deliver while still adding rival candidates.
+    # If you enlarge blocksize, this can go up with it; keep roughly cap <= blocksize_xy * xy_res.
+    max_spot_match_distance_um=200.0,
     count_floor=8,                   # minimum centroids per block
     match_floor=4,                   # minimum point matches per block
     adaptive_edges=True,
@@ -674,8 +687,7 @@ def _print_ladder(round_to_rounds, ref, gcfg, lcfg):
     rprint("  [dim]Mode: cellpose centroids (nucleus landmarks)[/dim]")
     rprint("═" * 72)
     rprint(f"  [cyan]1 COARSE[/cyan]  whole-volume affine · context window {radii}µm")
-    rprint(f"  [cyan]2 FINE  [/cyan]  local deform · tile sizes {blocks} "
-           f"[dim](cached deform reused when unchanged)[/dim]")
+    rprint(f"  [cyan]2 FINE  [/cyan]  local warps · block size {blocks}")
     rprint("  [dim]Every candidate is written to disk and listed with a composite tiff; [b]mi[/b] "
            "only suggests — you pick the row.[/dim]")
     rprint("═" * 72)
@@ -898,8 +910,12 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
 
             # ---- LOCAL (sweep blocksizes; best by MI) ----
             nbs = len(lcfg['blocksize'])
-            rprint(f"  [cyan][2/2] FINE[/cyan]  {nbs} tile size(s) "
-                   f"(large→small; deform reused when mask+coarse unchanged)")
+            # Plain language only. This used to read "N tile size(s) (large->small; deform reused
+            # when mask+coarse unchanged)", which named an iteration order that is meaningless with
+            # one block size and stated a caching RULE the reader cannot act on. The reuse FACT is
+            # reported by the result line below, which appends "(reused)" when it actually happens.
+            _bl = ', '.join('×'.join(str(int(v)) for v in b) for b in lcfg['blocksize'])
+            rprint(f"  [cyan][2/2] FINE[/cyan]  local warps · block size {_bl}")
             candidates = []
             # No progress bar over the tile sizes: each is ONE long opaque bigstream align (the bar
             # would just sit at 0% then jump). Print a 'computing' line so it's clearly still running.
@@ -908,7 +924,8 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
                 ldir = gdir / ltag
                 bstr = '×'.join(str(int(v)) for v in bs)
                 lcomp = comp_local / f"{rfolder}__{gtag}__{ltag}.tiff"
-                rprint(f"      computing deform bs{bstr} ({bi}/{nbs})…")
+                _n = f"{bi}/{nbs} " if nbs > 1 else ""      # the counter is noise when there is one
+                rprint(f"      computing local warp {_n}(block size {bstr})…")
                 try:
                     m = local_centroid_one(S, A_g, bs, lcfg, ldir, fingerprint=round_fp,
                                            overlay_tiff=lcomp)
