@@ -9,12 +9,10 @@ type: software
 license: BSD-3-Clause
 version: "0.1.0"
 
-# TODO before publishing: confirm the exact spelling and ORCIDs of the software
-# authors below. These are drawn from the repository's commit history and are the
-# code authors; the paper's full author list belongs in preferred-citation.
+# Software authors. The paper's full author list belongs in preferred-citation.
 authors:
-  - family-names: Singhal
-    given-names: Jonnathan
+  - family-names: Singh
+    given-names: Jonna
     email: jsinghal@bidmc.harvard.edu
     affiliation: "Beth Israel Deaconess Medical Center"
   - family-names: Amsalem

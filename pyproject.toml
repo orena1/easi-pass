@@ -15,9 +15,8 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 keywords = ["two-photon", "HCR", "FISH", "image-registration", "segmentation", "neuroscience"]
 
-# TODO before publishing: confirm names/emails (see CITATION.cff).
 authors = [
-    {name = "Jonnathan Singhal", email = "jsinghal@bidmc.harvard.edu"},
+    {name = "Jonna Singh", email = "jsinghal@bidmc.harvard.edu"},
     {name = "Oren Amsalem", email = "oren.a4@gmail.com"},
 ]
 
