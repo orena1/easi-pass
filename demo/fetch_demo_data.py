@@ -15,10 +15,12 @@ Usage:
     python fetch_demo_data.py --with-reference    # also fetch the completed reference
     python fetch_demo_data.py --force             # re-download even if data exists
 
-MAINTAINER TODO: after attaching the archives to a GitHub release, set RELEASE_BASE
-below and fill in the two SHA256s. Build each archive from a populated folder with:
-    (cd demo && zip -r JS078_demo_pre_run.zip  demo_pre_run/JS078_demo)  && sha256sum demo/JS078_demo_pre_run.zip
-    (cd demo && zip -r JS078_demo_post_run.zip demo_post_run/JS078_demo) && sha256sum demo/JS078_demo_post_run.zip
+For maintainers -- to publish a new version of the demo data, rebuild the archive,
+attach it to a release, then bump RELEASE_BASE and the sha256 below. Rebuild from a
+demo_pre_run/ holding ONLY the four seed files under OUTPUT/, or the archive ships a
+demo that has already been run:
+    (cd demo && zip -r /tmp/JS078_demo_pre_run.zip demo_pre_run/JS078_demo)
+    sha256sum /tmp/JS078_demo_pre_run.zip
 """
 import argparse
 import hashlib
