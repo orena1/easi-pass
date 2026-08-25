@@ -14,7 +14,25 @@ from skimage.measure import regionprops
 from skimage.segmentation import find_boundaries
 from scipy.optimize import minimize
 import scipy.io as sio
+import os as _os
+
+
+# Cascade detail lines are off by default. The per-stage IoU tells you whether the
+# alignment worked; the patch geometry, tile-acceptance counts and edge tallies only
+# matter when working out why a bad one went wrong. Set EASIPASS_VERBOSE=1 for those.
+_CASCADE_VERBOSE = _os.environ.get('EASIPASS_VERBOSE', '') not in ('', '0', 'false', 'False')
+
+
+def _detail(msg):
+    """print() for cascade internals; silent unless EASIPASS_VERBOSE is set."""
+    if _CASCADE_VERBOSE:
+        print(msg)
 from pathlib import Path
+
+try:
+    from .meta import pause          # Relative import (running as part of a package)
+except ImportError:
+    from meta import pause           # Absolute import (running in Jupyter notebook)
 
 
 # =============================================================================
@@ -56,8 +74,13 @@ def prompt_overwrite_per_plane(plane_idx: int, output_path: Path, overwrite_stat
     print(f"\n[registration] Existing output found:\n    {output_path}")
     print("    y = overwrite / recompute from scratch")
     print("    n = keep the existing files (choose this if they were provided/pre-seeded)")
+    # overwrite_state caches this answer, so it silently governs every later plane too.
+    print("  You are asked once: this answer is reused for every remaining plane.")
     while True:
-        response = input("Overwrite? [y/n]: ").strip().lower()
+        # pause(), not input(): Enters tapped during the long silent stage above would
+        # otherwise be eaten one per loop, spamming "Please enter y or n" before the user
+        # can answer.
+        response = pause("Overwrite? [y/n]: ").strip().lower()
         if response == 'y':
             overwrite_state[0] = True
             return True
@@ -99,55 +122,6 @@ def get_magnification_from_sbx(sbx_path):
     actual_magnification = float(magnification_list[magnification_idx - 1])
 
     return actual_magnification
-
-
-def _rational_to_float(val):
-    # tifffile may give (num, den) tuple-like or a Rational object
-    try:
-        return float(val[0]) / float(val[1])
-    except Exception:
-        return float(val)
-
-def read_spacing_xyz_from_tiff(path):
-    """
-    Returns (sx, sy, sz, unit) where s* are in 'unit' per pixel (e.g. micrometer / pixel).
-    If metadata is missing, falls back to 1.0.
-    """
-    sx = sy = sz = 1.0
-    unit = None
-
-    with TiffFile(path) as tif:
-        page = tif.pages[0]
-
-        # --- 1) ImageJ metadata (what Fiji commonly uses)
-        ij = tif.imagej_metadata or {}
-        # ImageJ 'unit' (e.g. 'micron', 'um')
-        unit = ij.get("unit", None)
-
-        # ImageJ 'spacing' is typically Z step in the same unit
-        # (often present for stacks)
-        if "spacing" in ij and ij["spacing"] is not None:
-            try:
-                sz = float(ij["spacing"])
-            except Exception:
-                pass
-
-        # --- 2) TIFF resolution tags: usually pixels per unit
-        # Fiji screenshot: "Resolution: 0.748 pixels per micron"
-        # so micron_per_pixel = 1 / 0.748 = 1.3369
-        tags = page.tags
-
-        xres = tags.get("XResolution")
-        yres = tags.get("YResolution")
-        if xres and yres:
-            x_ppu = _rational_to_float(xres.value)  # pixels per unit
-            y_ppu = _rational_to_float(yres.value)
-            if x_ppu and x_ppu > 0:
-                sx = 1.0 / x_ppu
-            if y_ppu and y_ppu > 0:
-                sy = 1.0 / y_ppu
-
-    return sx, sy, sz, unit
 
 
 def tps_warp_2p_to_hcr(twop_2d, landmarks_df, hcr_shape, order=0, downsample=10):
@@ -474,7 +448,8 @@ def read_tiff_resolution(tiff_path):
         return None
 
 
-def resolve_hcr_resolution(tiff_path, manifest_resolution=None, tolerance=0.05):
+def resolve_hcr_resolution(tiff_path, manifest_resolution=None, tolerance=0.05,
+                           require_metadata=False):
     """Pick final HCR resolution. TIFF metadata is the source of truth whenever it is
     readable; the manifest `resolution` is only a fallback for when metadata is missing.
 
@@ -492,6 +467,21 @@ def resolve_hcr_resolution(tiff_path, manifest_resolution=None, tolerance=0.05):
             f"and no `resolution` set in manifest's rounds entry.")
 
     if tiff_res is None:
+        if require_metadata:
+            # BigWarp exports landmark coordinates in whatever units the volume
+            # declares. An uncalibrated volume therefore yields pixel
+            # coordinates, which the landmark path then divides by a micron
+            # resolution -- every landmark lands at the wrong scale, and nothing
+            # downstream can detect it. A manifest value cannot rescue this,
+            # because it does not tell us what units BigWarp actually wrote.
+            raise ValueError(
+                f"HCR landmark scaling requires micron calibration on the volume, but "
+                f"{name} carries no readable ImageJ unit/spacing metadata.\n"
+                f"  {tiff_path}\n"
+                "Set the calibration (Fiji: Image > Properties, unit=micron with the "
+                "correct pixel width/height/depth), re-export the landmarks, and re-run. "
+                "A manifest `resolution` cannot substitute here: it says how big a voxel "
+                "is, not which units the landmark file is in.")
         print(f"  [WARN] HCR resolution: TIFF metadata unreadable at {name}; "
               f"using manifest {manifest_resolution} unverified.")
         return list(manifest_resolution)
@@ -1908,11 +1898,19 @@ def compute_adaptive_matching_params(cell_df, tile_size, stage_idx=0,
 
     For stage 0 (first cascade stage): uses tile-proportional defaults
       - search_xy = tile_size * tile_ratio
-      - search_z  = max(search_z_min, round(tile_size * z_tile_ratio))
+      - search_z  = max(search_z_min, round(tile_size * z_tile_ratio)) -- NOTE: unlike search_xy,
+        this has no upper cap; for the shipped [300,100,50] cascade the search_z_min floor of 2
+        dominates almost entirely (values come out 3, 2, 2), so z_tile_ratio barely does
+        anything in practice. Deliberately left as-is: it is not causing any known
+        problem, and any actual formula/cap change needs validation against a real
+        mouse, and against the cascade replay that imports this function directly to
+        reproduce the published numbers, before being safe to adopt.
     For subsequent stages: residual-driven from post-correction re-match
       - search_xy = ceil(P95(|dxy|) * multiplier), capped at tile_size*tile_ratio and search_xy_max
+        (search_xy_max is a config-safety ceiling for large custom cascade_stages tiles -- for
+        the shipped [300,100,50] cascade, tile_size*tile_ratio is always smaller and wins first)
       - search_z  = ceil(P95(|dz|)  * multiplier), capped at search_z_max
-        (falls back to stage-0 proportional value if cell_df has no 'dz' column)
+        (falls back to the stage-0 proportional value above if cell_df has no 'dz' column)
 
     Returns (patch_radius, search_xy, search_z).
     """
@@ -1928,7 +1926,9 @@ def compute_adaptive_matching_params(cell_df, tile_size, stage_idx=0,
 
     # XY search: enough to capture residuals with margin
     search_xy = max(search_xy_min, int(np.ceil(p_xy * multiplier)))
-    # Cap at fraction of tile size and absolute max
+    # Cap at fraction of tile size, and at an absolute safety ceiling (search_xy_max) that
+    # only ever binds for custom cascade_stages with much larger late-stage tiles -- for the
+    # shipped [300,100,50] cascade, tile_size*tile_ratio (40px/20px) is always smaller and wins.
     search_xy = min(search_xy, int(tile_size * tile_ratio), search_xy_max)
     # Patch must be at least patch_ratio * search
     patch_radius = max(search_xy, int(search_xy * patch_ratio))
@@ -1985,7 +1985,7 @@ def find_cell_displacements(twop_binary, twop_labels, hcr_3d_bin, z_map, centroi
     hcr_slices = {}
     for dz in range(-search_z, search_z + 1):
         hcr_slices[dz] = sample_hcr_binary_at_zmap(hcr_3d_bin, z_map, z_offset=dz)
-    print(f"  Pre-sampled {len(hcr_slices)} HCR Z-slices in {time.time() - t0:.1f}s")
+    _detail(f"  Pre-sampled {len(hcr_slices)} HCR Z-slices in {time.time() - t0:.1f}s")
 
     # FIX 1: dilate the FOV mask so the matcher always has real HCR to score
     # against, even at maximum shift. Without this, an edge cell shifted by
@@ -2013,9 +2013,9 @@ def find_cell_displacements(twop_binary, twop_labels, hcr_3d_bin, z_map, centroi
         edge_margin = 0
         twop_interior = fov_filled
 
-    print(f"  Patch: {full_size}x{full_size}, search: +/-{cell_search_xy}px, "
+    _detail(f"  Patch: {full_size}x{full_size}, search: +/-{cell_search_xy}px, "
           f"fov_dilation={fov_dilation_eff}, edge_margin={edge_margin}")
-    print(f"  Patch:search ratio: {full_size / max(1, 2 * cell_search_xy):.1f}:1")
+    _detail(f"  Patch:search ratio: {full_size / max(1, 2 * cell_search_xy):.1f}:1")
 
     # Pre-compute FFT shape (same for all cells with same patch size)
     fft_h = 1 << int(np.ceil(np.log2(full_size)))
@@ -2110,9 +2110,9 @@ def find_cell_displacements(twop_binary, twop_labels, hcr_3d_bin, z_map, centroi
         if best_peak_ratio < min_peak_ratio:
             n_ambiguous += 1
 
-    print(f"  Edge cells (shifted extraction): {n_shifted}")
-    print(f"  Edge-skipped cells (within {edge_margin}px of FOV boundary): {n_edge_skipped}")
-    print(f"  Ambiguous matches (peak_ratio < {min_peak_ratio}): {n_ambiguous}")
+    _detail(f"  Edge cells (shifted extraction): {n_shifted}")
+    _detail(f"  Edge-skipped cells (within {edge_margin}px of FOV boundary): {n_edge_skipped}")
+    _detail(f"  Ambiguous matches (peak_ratio < {min_peak_ratio}): {n_ambiguous}")
     return results
 
 
@@ -2272,7 +2272,7 @@ def run_local_tile_ransac(twop_binary, hcr_3d_bin, z_map, centroids, cell_df,
     ny, nx = twop_binary.shape
     step = int(tile_size * (1 - overlap))
     good = cell_df[(cell_df.iou_best >= min_iou) & (cell_df.iou_gain >= min_gain)]
-    print(f"  Cells passing local threshold: {len(good)} / {len(cell_df)}")
+    _detail(f"  Cells passing local threshold: {len(good)} / {len(cell_df)}")
 
     tile_results = []
     n_iou_rejected = 0
@@ -2433,7 +2433,7 @@ def _synthesize_warp_from_tiles(
                 n_outlier_rejected += 1
         accepted = [t for t in tile_results if t['accepted']]
     if verbose:
-        print(f"  Accepted tiles: {len(accepted)} / {len(tile_results)} "
+        _detail(f"  Accepted tiles: {len(accepted)} / {len(tile_results)} "
               f"(IoU-rejected: {n_iou_rejected}, spatial-outlier: {n_outlier_rejected})")
     if len(accepted) < 3:
         return np.zeros((ny, nx)), np.zeros((ny, nx)), np.zeros((ny, nx)), tile_results
@@ -2468,7 +2468,7 @@ def _synthesize_warp_from_tiles(
         dz_vals = np.concatenate([dz_vals, nn_dz_i(border_pts) * w])
         centers = np.vstack([centers, border_pts])
         if verbose:
-            print(f"  Border anchors: {n_border} points (spacing={s}px, "
+            _detail(f"  Border anchors: {n_border} points (spacing={s}px, "
                   f"decay={decay_radius:.0f}px, floor={border_weight_floor})")
 
     yy, xx = np.mgrid[:ny, :nx]

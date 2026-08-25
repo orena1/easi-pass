@@ -7,9 +7,9 @@ import pandas as pd
 from pathlib import Path
 
 try:
-    from .meta import rprint, Prompt  # Relative import (running as part of a package)
+    from .meta import rprint, Prompt, pause, flush_input  # Relative import (running as part of a package)
 except ImportError:
-    from meta import rprint, Prompt  # Absolute import (running in Jupyter notebook)
+    from meta import rprint, Prompt, pause, flush_input  # Absolute import (running in Jupyter notebook)
 
 
 def find_landmark_file(base_dir, plane, prefix="", suffix="_landmarks.csv", hcr_ref="1"):
@@ -101,7 +101,7 @@ def prompt_for_missing_file(file_path, file_description, instructions=None, tool
             rprint(f"{instructions}\n")
 
         rprint(f"Create this file in {tool_hint}, then press [green]Enter[/green] to continue...")
-        input()
+        pause()
 
         if file_path.exists():
             rprint(f"[green]Found: {file_path.name}[/green]\n")
@@ -168,14 +168,15 @@ def prompt_registration_checkpoint(qa_paths, auto_landmarks_path, step_name, pla
     rprint("  \\[[yellow]r[/yellow]] Refine - edit landmarks_auto.csv in BigWarp, then re-run")
     rprint("  \\[[red]n[/red]] Skip - skip this plane, continue with others\n")
 
-    choice = Prompt.ask("Your choice", choices=["y", "r", "n"], default="y")
+    flush_input()   # don't let Enters tapped during the auto-registration answer this
+    choice = Prompt.ask("Accept, refine, or skip?", choices=["y", "r", "n"], default="y")
 
     if choice == "y":
         return "accept"
     elif choice == "r":
         rprint(f"\n[yellow]Edit the landmarks file, save it, then press Enter:[/yellow]")
         rprint(f"  {auto_landmarks_path}")
-        input("Press Enter when ready...")
+        pause("Press Enter when ready...")
         return "refine"
     else:
         return "skip"

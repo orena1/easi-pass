@@ -132,32 +132,28 @@ class AnalysisConfig:
 
 def normalize_path(path: Union[str, Path]) -> Path:
     """
-    Normalize path for cross-platform compatibility.
+    Rewrite a network path for the platform this is running on.
 
-    Handles conversion between:
-    - Linux: /mnt/nasquatch/data/...
-    - Windows: //nasquatch/data/... or \\\\nasquatch\\data\\...
+    The same share is reached as ``/mnt/<host>/...`` from Linux and as
+    ``//<host>/...`` (or ``\\\\<host>\\...``) from Windows, so a path stored in one
+    convention does not open in the other. Any host works; nothing here is
+    specific to a particular server.
 
-    Automatically detects current platform and converts accordingly.
+    Paths that are not of either form are returned unchanged.
     """
     import platform
-    path_str = str(path)
+    import re
 
-    # Detect platform
-    is_windows = platform.system() == 'Windows'
+    path_str = str(path).replace('\\', '/')
 
-    if is_windows:
-        # Convert Linux mount to Windows UNC
-        if path_str.startswith('/mnt/nasquatch/'):
-            path_str = '//nasquatch/' + path_str[15:]  # len('/mnt/nasquatch/') = 15
-        elif path_str.startswith('/mnt/nasquatch'):
-            path_str = '//nasquatch' + path_str[14:]
+    if platform.system() == 'Windows':
+        m = re.match(r'^/mnt/([^/]+)(/.*)?$', path_str)
+        if m:
+            path_str = '//' + m.group(1) + (m.group(2) or '')
     else:
-        # Convert Windows UNC to Linux mount
-        if path_str.startswith('//nasquatch/'):
-            path_str = '/mnt/nasquatch/' + path_str[12:]
-        elif path_str.startswith('\\\\nasquatch\\'):
-            path_str = '/mnt/nasquatch/' + path_str[12:].replace('\\', '/')
+        m = re.match(r'^//([^/]+)(/.*)?$', path_str)
+        if m:
+            path_str = '/mnt/' + m.group(1) + (m.group(2) or '')
 
     return Path(path_str)
 
@@ -1684,7 +1680,7 @@ def build_frame_mapping(
     Parameters
     ----------
     base_path : Path
-        Base path to data (e.g., /mnt/nasquatch/data/2p/jonna/EASI_FISH/pipeline)
+        Base path to data: the folder that contains {sample_name}/
     mouse_name : str
         Mouse name (e.g., 'PS274_1R')
     date : str

@@ -5,7 +5,7 @@ see the pipeline's inputs and outputs. It takes a single 2-photon mean image, al
 it to a full-frame HCR confocal volume, segments cells in both, matches them, and writes
 a per-cell table joining 2P identity to the 5 HCR gene channels.
 
-This is the **stills / image-align** use case (`--tiff_only`): a static 2P image, not a
+This is the **stills / image-align** use case (`input_format: "tiff"`): a static 2P image, not a
 movie, so there are no activity traces — just cross-modal alignment + the molecular join.
 
 ## What's in this folder
@@ -13,10 +13,10 @@ movie, so there are no activity traces — just cross-modal alignment + the mole
 ```
 demo/
 ├── README.md              ← you are here
-├── JS078_demo.hjson       ← the manifest (edit base_path, then run)
+├── JS078_demo.hjson       ← the manifest; nothing to edit
 ├── make_demo_data.py      ← how the demo subset was assembled from full JS078 (reproducible)
-├── fetch_demo_data.py     ← downloads the imaging data from Zenodo
-├── demo_pre_run/          ← FRESH: the data you run the pipeline on (fetched from Zenodo)
+├── fetch_demo_data.py     ← downloads the imaging data from the GitHub release
+├── demo_pre_run/          ← FRESH: the data you run the pipeline on (~350 MB download)
 │   └── JS078_demo/
 │       ├── 2P/plane_0.tiff              (2P low-res mean image, ~1.6 MB)
 │       ├── 2P/plane_0_hires.tiff        (2P hi-res stitched image, ~49 MB)
@@ -26,15 +26,13 @@ demo/
 │           ├── lowres_plane0_masks_in_hires_space.tiff       (2P placement in hi-res space)
 │           ├── lowres_meanImg_C0_plane0_rotated.tiff         (rotated 2P mean)
 │           └── hires_stitched_plane0_rotated.tiff            (rotated 2P hi-res)
-├── demo_post_run/         ← REFERENCE: a full, correct completion to compare against
-│   └── JS078_demo/OUTPUT/ (the whole output tree; fetch with --with-reference)
-└── completed/             ← the single golden matches CSV, tracked in git for a quick diff
+└── completed/             ← the golden matches table, tracked in git, to diff against
 ```
 
-You run the pipeline on **`demo_pre_run/`**, then compare your result against
-**`demo_post_run/`** (the full reference) or — for a quick check without the multi-GB
-download — against the small golden CSV in **`completed/`**. Only the text files and that
-golden CSV are tracked in git; the imaging data lives on Zenodo (see `fetch_demo_data.py`).
+You run the pipeline on **`demo_pre_run/`**, then compare your result against the golden
+table in **`completed/`** — 398 KB, tracked in git, so the check costs no download. Only
+the text files and that table are in the repo; the imaging data is a GitHub release asset
+fetched by `fetch_demo_data.py`.
 
 ## Prerequisites
 
@@ -45,20 +43,17 @@ golden CSV are tracked in git; the imaging data lives on Zenodo (see `fetch_demo
 
 ## Run it
 
+Both commands run from the repository root. There is nothing to edit: the manifest's
+`base_path` is relative, so it finds its own data.
+
 1. **Get the data:**
    ```bash
-   cd demo
-   python fetch_demo_data.py                   # the fresh dataset (demo_pre_run/)
-   python fetch_demo_data.py --with-reference  # also grab the completed reference (demo_post_run/)
+   python demo/fetch_demo_data.py
    ```
 
-2. **Point the manifest at it:** open `demo/JS078_demo.hjson` and set `base_path` to the
-   absolute path of `demo/demo_pre_run` on your machine, e.g.
-   `/home/you/ezfish_pipeline/demo/demo_pre_run`.
-
-3. **Run the pipeline** (from the repo root):
+2. **Run the pipeline:**
    ```bash
-   python master_pipeline.py --manifest demo/JS078_demo.hjson --tiff_only
+   python master_pipeline.py --manifest demo/JS078_demo.hjson
    ```
    Stages: HCR segmentation → 2P segmentation → low-res→hi-res placement → 2P→HCR
    registration (using the shipped seed landmarks) → cell matching → merged table.
@@ -67,7 +62,7 @@ golden CSV are tracked in git; the imaging data lives on Zenodo (see `fetch_demo
    - `Verify 2P cellpose segmentations … press Enter` → press **Enter**.
    - `Overwrite? [y/n]` (the `[registration] Existing output found …` prompt, low-res→hi-res step) → **n**.
      This keeps the shipped 2P *placement*. The automated SIFT placement is fragile in
-     the tiff-only path (on this plane it lands ~100 px off, which makes the 2P→HCR
+     the tiff path (on this plane it lands ~100 px off, which makes the 2P→HCR
      overlay come out stringy); the shipped placement is the production one, so the
      alignment reproduces the paper-quality overlay. Answering `y` regenerates it and
      may degrade the result.
@@ -92,12 +87,12 @@ signal is a 2P→HCR cascade `Final: IoU ~0.48` with an accepted small global sh
 (plane 0) and one HCR round (01) — assembled with:
 ```bash
 python make_demo_data.py \
-  --src /mnt/nasquatch/data/2p/jonna/EASI_FISH/pipeline/JS078 \
+  --src /path/to/EASI_FISH/pipeline/JS078 \
   --dst ./demo_pre_run/JS078_demo
 ```
-`demo_post_run/` is then produced by running the pipeline on `demo_pre_run/` and keeping
-the resulting `OUTPUT/` tree (that is the reference users compare against). Build the two
-Zenodo archives from these folders as noted in `fetch_demo_data.py`.
+The golden table in `completed/` is the match CSV from a validated run of that data; it is
+what users diff against. Build the release archive as noted in `fetch_demo_data.py`, attach
+it to a GitHub release, and update `RELEASE_BASE` and the sha256 there.
 Everything is shipped at **full resolution and full frame** — the HCR volume is copied
 verbatim (~774 MB, all 5 gene channels, all 39 Z slices), and the BigWarp landmarks are
 copied verbatim (no coordinate shift, since nothing is cropped).
@@ -106,4 +101,5 @@ copied verbatim (no coordinate shift, since nothing is cropped).
 2P→HCR registration needs the surrounding HCR image context (and several landmark cells
 sit near the tissue edge). Cropping halved alignment quality — plane0 best-match median
 IoU dropped 0.38 → 0.16 vs the uncropped run — and made the overlay masks look
-misaligned. The data lives on Zenodo anyway, so full-frame size is not a repo concern.
+misaligned. The data is a release asset, not a tracked file, so full-frame size is not a
+repo concern.

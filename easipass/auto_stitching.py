@@ -30,9 +30,9 @@ import numpy as np
 from tqdm import tqdm
 
 try:
-    from .meta import rprint  # Relative import (running as part of a package)
+    from .meta import rprint, pause  # Relative import (running as part of a package)
 except ImportError:
-    from meta import rprint  # Absolute import (running in Jupyter notebook)
+    from meta import rprint, pause  # Absolute import (running in Jupyter notebook)
 
 
 class StitchingError(Exception):
@@ -663,7 +663,11 @@ def auto_stitch_tiles(
         | warn_if_cross_slice_shifts_vary(per_plane_shifts, consensus_shifts, tolerance=0.20)
     )
     if alarms:
-        resp = input("Continue stitching despite warnings? [y/N] ").strip().lower()
+        # State what each answer does: anything other than 'y' aborts the whole run with an
+        # exception, which the bare "[y/N]" did not convey.
+        print("    y = stitch anyway, using the shifts above")
+        print("    n = stop now and write nothing (fix the tiles or overlap_fraction, then re-run)")
+        resp = pause("Continue stitching despite the warnings above? [y/N]: ").strip().lower()
         if resp != 'y':
             raise StitchingError("User aborted after stitching warnings")
 

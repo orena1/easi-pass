@@ -21,22 +21,91 @@ except ImportError:
     class Prompt:
         @staticmethod
         def ask(prompt, choices=None, default=None, **kwargs):
-            ans = input(str(prompt) + ' ').strip()
-            if not ans and default is not None:
-                return default
-            return ans
+            # Mirror rich's Prompt.ask: SHOW the options and the default, and keep asking
+            # until the answer is one of them. Previously `choices` was accepted and then
+            # ignored, so without rich the user saw a bare prompt with no hint of the valid
+            # answers, and a typo was returned verbatim -- landing in whatever the caller's
+            # else-branch did (at the automation checkpoint, silently skipping the plane).
+            suffix = f" [{'/'.join(choices)}]" if choices else ""
+            if default is not None:
+                suffix += f" ({default})"
+            while True:
+                ans = input(f"{str(prompt)}{suffix}: ").strip()
+                if not ans and default is not None:
+                    return default
+                if not choices or ans in choices:
+                    return ans
+                print(f"  Please enter one of: {', '.join(choices)}")
+
+
+def flush_input():
+    """Discard anything already typed at the terminal. Call immediately before a blocking
+    review prompt.
+
+    Why this is needed: the stages between two review prompts are long and silent (one
+    piecewise deform runs ~15 min printing nothing), which invites people to tap Enter to
+    check the run is still alive. Those newlines sit in the tty buffer and are swallowed
+    instantly by the NEXT input(), so the following prompt appears to never happen -- it
+    returns '' and silently takes the default. Flushing first means every review prompt
+    actually stops and waits for a fresh answer.
+
+    No-op when stdin is not a tty, so piped/scripted runs keep their supplied input.
+    """
+    try:
+        if not sys.stdin.isatty():
+            return
+    except Exception:
+        return                              # detached/odd stdin: nothing safe to flush
+    try:
+        import termios                      # POSIX -- the pipeline runs on Linux
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        try:
+            import msvcrt                   # Windows
+            while msvcrt.kbhit():
+                msvcrt.getwch()
+        except Exception:
+            pass                            # can't flush here; the prompt still works
+
+
+def pause(prompt=""):
+    """input() that first discards type-ahead. Use this for EVERY blocking pipeline prompt.
+
+    A bare input() reads whatever is already sitting in the tty buffer, so Enters tapped during
+    a long silent stage get consumed by the NEXT prompt. Depending on the prompt that either
+    blows straight through a checkpoint the user never saw, or -- at a validating prompt --
+    spams its retry message once per queued newline before the user can answer.
+    """
+    flush_input()
+    return input(prompt)
 
 
 def parse_json(json_file):
     """
     Parse a json/hjson manifest. Normalizes base_path slashes so the same
-    manifest works whether loaded on Linux (/mnt/...) or Windows (\\...).
+    manifest works whether loaded on Linux (/mnt/...) or Windows (\\...), and
+    resolves a relative base_path against the manifest's own directory so a
+    manifest can sit beside its data and travel with it.
     """
     with open(json_file, 'r') as f:
         manifest = hjson.load(f)
+
+    # `sample_name` is the general spelling; `mouse_name` is what the lab's
+    # manifests use and what the code reads throughout. Accept either.
+    data = manifest.get('data', {})
+    if 'sample_name' in data and 'mouse_name' not in data:
+        data['mouse_name'] = data['sample_name']
+
     bp = manifest.get('data', {}).get('base_path')
     if isinstance(bp, str):
-        manifest['data']['base_path'] = bp.replace('\\', '/')
+        bp = bp.replace('\\', '/')
+        # Checked explicitly rather than with Path.is_absolute(): on Windows a
+        # POSIX path like /mnt/data/... has no drive and would be reported
+        # as relative, which would silently rewrite every lab manifest.
+        is_absolute = bp.startswith('/') or (len(bp) > 1 and bp[1] == ':')
+        if not is_absolute:
+            bp = (Path(json_file).resolve().parent / bp).resolve().as_posix()
+        manifest['data']['base_path'] = bp
     return manifest
 
 
@@ -46,16 +115,37 @@ def output_root(full_manifest) -> Path:
     return Path(data['base_path']) / data['mouse_name'] / 'OUTPUT'
     
 def user_input_missing(check_results, message, color):
-    if  (np.array(check_results)[:,1]==False).any():
-        print("Missing 2P runs:")
-        while True:
-            for i in check_results[check_results[:,1]==False]:
-                print(i[0])
-            out = Prompt.ask(f"\n[italic {color}]Some 2p runs are missing, do you whish to continue?[/italic {color}]", choices=["y", "n", "check-again"])
-            if out=='n':
-                sys.exit()
-            if out=='y':
-                return
+    """Prompt if any path in check_results is missing.
+
+    check_results rows are (path, exists). The exists flag is recomputed here
+    rather than trusted: callers build these with np.array([[path, bool]]),
+    which numpy coerces to a string array, turning False into the truthy
+    'False' and making the comparison silently never match. Re-statting also
+    makes 'check-again' do something -- it previously re-printed the same
+    cached list forever.
+    """
+    paths = [str(row[0]) for row in check_results]
+    while True:
+        missing = [p for p in paths if not os.path.exists(p)]
+        if not missing:
+            return
+        print("Missing:")
+        for p in missing:
+            print(f"  {p}")
+        # The message carries rich markup, so it goes through rprint; only the bare label is
+        # handed to Prompt.ask (the no-rich fallback would print the tags literally).
+        # Spell out what each answer DOES -- 'y' here continues the run with these files
+        # absent, which is the consequential one and was never stated.
+        rprint(f"\n[italic {color}]{message}[/italic {color}]")
+        rprint("  [green]y[/green]           = continue anyway, without these files")
+        rprint("  [red]n[/red]           = stop now")
+        rprint("  [yellow]check-again[/yellow] = re-check these paths (add the files first, then choose this)")
+        flush_input()
+        out = Prompt.ask("Your choice", choices=["y", "n", "check-again"])
+        if out == 'n':
+            sys.exit()
+        if out == 'y':
+            return
 
 def verify_manifest(manifest, args):
     '''
@@ -78,18 +168,40 @@ def verify_manifest(manifest, args):
     base_path = Path(manifest['base_path'])
     mouse_name = manifest['mouse_name']
 
+    # A manifest with no functional section can only be an HCR-only run, so
+    # infer it rather than asserting and making the user re-issue the command
+    # with a flag that carries no information the manifest lacks.
+    if not args.only_hcr and 'two_photon_imaging' not in manifest:
+        rprint("[dim]No two_photon_imaging section: running FISH rounds only.[/dim]")
+        args.only_hcr = True
+
     # 2P validation only when not in HCR-only mode
     session = None
     has_hires = False
     if not args.only_hcr:
-        assert 'two_photon_imaging' in manifest, "'two_photon_imaging' section required for full pipeline mode"
         assert len(manifest['two_photon_imaging']['sessions'])==1, 'only support one 2P sessions'
         session = manifest['two_photon_imaging']['sessions'][0]
         if getattr(args, 'tiff_only', False):
             if session.get('input_format') and session['input_format'] != 'tiff':
                 rprint(f"[yellow]--tiff_only: ignoring manifest input_format={session['input_format']!r}[/yellow]")
             session['input_format'] = 'tiff'
-        input_format = session.get('input_format', 'sbx')
+
+        # Required, not defaulted. The historical default was 'sbx', the one
+        # format that only works inside the Andermann lab, so a manifest that
+        # simply omitted this silently took the least portable path.
+        input_format = session.get('input_format')
+        if input_format is None:
+            raise ValueError(
+                "two_photon_imaging.sessions[0].input_format is required. Choose one:\n"
+                "  tiff     pre-processed 2P mean images at 2P/plane_{N}.tiff -- the standard path\n"
+                "  suite2p  an existing Suite2p output folder\n"
+                "  sbx      raw ScanBox .sbx (Andermann-lab internal acquisition format)\n"
+                "\n"
+                "See examples/demo_tiff.hjson for a complete example.")
+        if input_format not in ('tiff', 'suite2p', 'sbx'):
+            raise ValueError(
+                f"Unknown input_format {input_format!r}. Expected 'tiff', 'suite2p' or 'sbx'.\n"
+                "A misspelled value previously fell through to the ScanBox path.")
 
     #test that reference round exists
     reference_round = manifest['HCR_confocal_imaging']['reference_round']
@@ -126,7 +238,7 @@ def verify_manifest(manifest, args):
                     run_path_sbx = base_path / mouse_name / '2P' /  f'{mouse_name}_{date_two_photons}_{run}' / f'{mouse_name}_{date_two_photons}_{run}.sbx'
                     check_results.append([run_path_sbx,os.path.exists(run_path_sbx)])
         check_results = np.array(check_results)
-        user_input_missing(check_results, 'Some 2p runs are missing, do you whish to continue?', color='red')
+        user_input_missing(check_results, 'Some 2p runs are missing, do you wish to continue?', color='red')
 
         # verify that functional run exists.
         suite2p_run = session['functional_run'][0]

@@ -20,16 +20,17 @@ as `OUTPUT/MERGED/aligned_extracted_features/full_table_*.pkl`.)
 | quantity | value |
 |---|---|
 | HCR cells segmented (whole 3D volume, all 39 z-slices) | ~21,000 |
-| 2P cells segmented in the plane | ~1,390 |
-| 2P cells matched 1:1 | ~1,180 — **~85% of the 2P cells** |
-| 2P cells soma-print called confidently | ~1,150 — ~83% |
-| best-match median IoU (at 2P z) | ~0.29 |
+| 2P cells segmented in the plane | 1,439 |
+| 2P cells matched 1:1 (IoU) | 1,199 — **83% of the 1,439 segmented** |
+| 2P cells soma-print called confidently | 1,149 — 80% |
+| best-match median IoU (at 2P z) | 0.29 |
 | 2P→HCR cascade final overlay IoU | ~0.48 |
 | global coarse shift found | dx ≈ −18 px, accepted (no `[WARN] Global rejected`) |
 
 Note the two cell counts are not comparable directly: the ~21,000 FISH cells span the whole
 3D volume, while one 2P plane intersects only a thin slab of it. The match rate to judge your
-run by is **matched / 2P cells segmented**, i.e. ~85%.
+run by is **matched / 2P cells segmented**, i.e. ~83%. The console prints the stricter
+**matched / cells that overlap anything** instead, which is ~91%.
 
 If your `Final: IoU` is ~0.48 and the global shift is a small (~tens of px) accepted
 value, the 2P→HCR overlay is correct. A railed shift (e.g. `dy=+100`) that gets

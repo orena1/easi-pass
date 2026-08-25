@@ -9,11 +9,11 @@ from pathlib import Path
 
 try:
     from .meta import (parse_json, get_hcr_to_hcr_registration_config, get_rotation_config, rprint, track,
-                       get_round_folder_name)  # Relative import (for running as part of a package)
+                       get_round_folder_name, flush_input, pause)  # Relative import (for running as part of a package)
     from . import automation as auto
 except ImportError:
     from meta import (parse_json, get_hcr_to_hcr_registration_config, get_rotation_config, rprint, track,
-                      get_round_folder_name)  # Absolute import (for running in Jupyter Notebook)
+                      get_round_folder_name, flush_input, pause)  # Absolute import (for running in Jupyter Notebook)
     import automation as auto
 
 try:
@@ -31,6 +31,7 @@ try:
         fit_affine_ransac, run_local_tile_ransac,
         compute_tile_defaults, compute_adaptive_matching_params,
         resolve_hcr_resolution,
+        _detail,
     )
 except ImportError:
     from registrations_utils import (
@@ -45,6 +46,7 @@ except ImportError:
         fit_affine_ransac, run_local_tile_ransac,
         compute_tile_defaults, compute_adaptive_matching_params,
         resolve_hcr_resolution,
+        _detail,
     )
 import pandas as pd
 
@@ -53,20 +55,14 @@ from tifffile import imwrite as tif_imwrite
 from tifffile import imread as tif_imread
 # RBFInterpolator/griddata now handled in registrations_utils.py
 
-# bigstream: prefer the pip-installed package (`pip install -e ".[bigstream]"`).
-# Only if it isn't importable, fall back to a local checkout (lab dev machines),
-# adding the first path that actually exists.
+# bigstream is a core dependency, so the pinned fork installs with the package.
+# A checkout beside the working directory still wins if one is present, which is
+# how you test a local bigstream without reinstalling.
 import importlib.util
 if importlib.util.find_spec("bigstream") is None:
-    for _bs in (
-        os.path.join(os.getcwd(), "bigstream_v2_andermann"),
-        "/mnt/nasquatch/data/2p/jonna/Code_Python/Notebooks_Jonna/BigStream/bigstream_v2_andermann",
-        r"\\nasquatch\data\2p\jonna\Code_Python\Notebooks_Jonna\BigStream\bigstream_v2_andermann",
-        r"C:\Users\jonna\Notebooks_Jonna\BigStream\bigstream_v2_andermann",
-    ):
-        if os.path.exists(_bs):
-            sys.path.insert(0, _bs)
-            break
+    _bs = os.path.join(os.getcwd(), "bigstream_v2_andermann")
+    if os.path.exists(_bs):
+        sys.path.insert(0, _bs)
 
 from bigstream.piecewise_transform import distributed_apply_transform
 from ClusterWrap import cluster as cluster_constructor
@@ -78,13 +74,19 @@ except ImportError:
     from meta import output_root
 
 
-def _resolve_hcr_path(expected_path: Path) -> Path:
+def _resolve_hcr_path(expected_path: Path, alt_stems=()) -> Path:
     """Resolve an HCR TIFF path with case-insensitive and extension-flexible matching.
 
     Users may name files with varying case (e.g. _To_, _to_, _TO_) and extensions
     (.tiff vs .tif). This function finds the actual file on disk that matches the
     expected filename pattern, returning the real path if found, or the original
     expected path if no match exists (so downstream code can report the standard name).
+
+    alt_stems are accepted after the expected stem, in the order given. A moving
+    round is named {mouse}_HCR{N}_to_HCR{ref} once registered, but the acquired
+    file is {mouse}_HCR{N}; accepting both is what lets a first run proceed.
+    Priority is by stem order, not by directory order, so the registered file
+    still wins when both are present.
     """
     if expected_path.exists():
         return expected_path
@@ -92,41 +94,92 @@ def _resolve_hcr_path(expected_path: Path) -> Path:
     parent = expected_path.parent
     if not parent.exists():
         return expected_path
-    stem_lower = expected_path.stem.lower()
+    by_stem = {}
     for candidate in parent.iterdir():
         if not candidate.is_file():
             continue
         if candidate.suffix.lower() not in ('.tiff', '.tif'):
             continue
-        if candidate.stem.lower() == stem_lower:
-            return candidate
+        by_stem.setdefault(candidate.stem.lower(), candidate)
+    for stem in (expected_path.stem, *alt_stems):
+        hit = by_stem.get(stem.lower())
+        if hit is not None:
+            return hit
     return expected_path
 
 
-def HCR_confocal_imaging(manifest, only_paths=False):
+def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
     """
     print instructions on how to register the HCR data round to round
     only_paths: if True, return only the paths to the files and not registration instructions
+    require_all_rounds: if False, only the reference round has to be on disk; the later
+    rounds may still be at the bench
     """
 
     mov_rounds = []
-    reference_round_number = manifest['HCR_confocal_imaging']['reference_round']
+    sample = manifest['mouse_name']
+    ref = manifest['HCR_confocal_imaging']['reference_round']
+    reference_round_number = ref
+    hcr_dir = Path(manifest['base_path']) / sample / 'HCR'
+
+    def _spellings(r):
+        """Round '01' and '1' name the same round. Accepting both removes a
+        silent miss when the manifest and the filename disagree on padding."""
+        out = [str(r)]
+        try:
+            n = int(r)
+        except (TypeError, ValueError):
+            return out
+        for alt in (str(n), f"{n:02d}"):
+            if alt not in out:
+                out.append(alt)
+        return out
+
+    def _stems(r):
+        """Accepted names for round r, most specific first, so a registered
+        volume always wins over an acquired one of the same round. The
+        sample-name prefix is optional: the file already lives in {sample}/HCR/,
+        and requiring it means renaming every volume on the way in."""
+        stems = []
+        for rr in _spellings(r):
+            for ff in _spellings(ref):
+                stems.append(f"{sample}_HCR{rr}_to_HCR{ff}")
+        for rr in _spellings(r):
+            stems.append(f"{sample}_HCR{rr}")
+        for rr in _spellings(r):
+            for ff in _spellings(ref):
+                stems.append(f"HCR{rr}_to_HCR{ff}")
+        for rr in _spellings(r):
+            stems.append(f"HCR{rr}")
+        return stems
+
     for i in manifest['HCR_confocal_imaging']['rounds']:
-        if i['round'] == reference_round_number:
-            reference_round = _resolve_hcr_path(Path(manifest['base_path']) / manifest['mouse_name'] / 'HCR' / f"{manifest['mouse_name']}_HCR{reference_round_number}.tiff")
+        if i['round'] == ref:
+            stems = [f"{sample}_HCR{rr}" for rr in _spellings(ref)]
+            stems += [f"HCR{rr}" for rr in _spellings(ref)]
+            reference_round = _resolve_hcr_path(
+                hcr_dir / f"{stems[0]}.tiff", alt_stems=tuple(stems[1:]))
         else:
-            mov_rounds.append(_resolve_hcr_path(Path(manifest['base_path']) / manifest['mouse_name'] / 'HCR' / f"{manifest['mouse_name']}_HCR{i['round']}_to_HCR{reference_round_number}.tiff"))
+            stems = _stems(i['round'])
+            mov_rounds.append(_resolve_hcr_path(
+                hcr_dir / f"{stems[0]}.tiff", alt_stems=tuple(stems[1:])))
     
     while True:
         missing_files = []
         if not reference_round.exists():
             missing_files.append(f"Reference: {reference_round.name}")
-        for i in mov_rounds:
-            if not i.exists():
-                missing_files.append(f"Round: {i.name}")
+        if require_all_rounds:
+            for i in mov_rounds:
+                if not i.exists():
+                    missing_files.append(f"Round: {i.name}")
 
         if not missing_files:
-            rprint("[green]All HCR round files found[/green]")
+            pending = [i for i in mov_rounds if not i.exists()]
+            if pending:
+                rprint(f"[green]Reference round found[/green] "
+                       f"[dim]({len(pending)} later round(s) not yet acquired)[/dim]")
+            else:
+                rprint("[green]All HCR round files found[/green]")
             break
 
         rprint(f"\n[bold yellow]Missing HCR round files:[/bold yellow]")
@@ -134,24 +187,71 @@ def HCR_confocal_imaging(manifest, only_paths=False):
             rprint(f"  [yellow]{f}[/yellow]")
         rprint(f"\nExpected directory: [dim]{reference_round.parent}[/dim]")
         rprint("\nAdd the missing files, then press [green]Enter[/green] to continue...")
-        input()
+        pause()
     if only_paths:
         return reference_round, mov_rounds
     # register the rounds
 
 def registration_apply(full_manifest):
-    """Materialise the reference round's full stack for the 2P->HCR step.
+    """Optionally write every FISH round warped into the reference frame.
 
-    HCR intensities are measured on the acquired (un-warped) rounds and mask
-    alignment is handled by align_masks_to_reference, so no per-channel probe
-    warp is produced — only the reference round is copied into
-    full_registered_stacks/, which the 2P->HCR registration reads."""
-    _, reference_round, _ = verify_rounds(full_manifest, parse_registered=True, print_rounds=True, print_registered=True)
+    Off unless params.export_warped_rounds is true, because nothing in the
+    pipeline reads these: probe intensities are measured on the acquired,
+    un-warped rounds, and matching runs on the label volumes in
+    cellpose_aligned/. They exist so you can look at the rounds superimposed --
+    for QC and for figures.
 
-    reference_round_full_stack_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
-    if not reference_round_full_stack_path.exists():
-        reference_round_full_stack_path.parent.mkdir(exist_ok=True, parents=True)
-        shutil.copyfile(reference_round['image_path'], reference_round_full_stack_path)
+    Warping resamples the signal, which is exactly why quantification does not
+    use it, so treat these as pictures rather than as data.
+    """
+    params = parse_json(full_manifest['manifest_path'])['params']
+    if not params.get('export_warped_rounds', False):
+        return
+
+    round_to_rounds, reference_round, register_rounds = verify_rounds(
+        full_manifest, parse_registered=True, print_rounds=False,
+        print_registered=False, func='export-warped')
+    ref = reference_round['round']
+    out_dir = output_root(full_manifest) / 'HCR' / 'full_registered_stacks'
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # The reference round defines the frame, so it is already aligned.
+    ref_out = out_dir / f"HCR{ref}.tiff"
+    if not ref_out.exists():
+        shutil.copyfile(reference_round['image_path'], ref_out)
+
+    pending = [r for r in register_rounds
+               if not (out_dir / f"{get_round_folder_name(r, ref)}.tiff").exists()]
+    if not pending:
+        return
+
+    rprint(f"[bold]Exporting {len(pending)} warped round(s) to full_registered_stacks/[/bold] "
+           "[dim](params.export_warped_rounds)[/dim]")
+
+    ref_vol = tif_imread(reference_round['image_path'])
+    n_z, n_y, n_x = ref_vol.shape[0], ref_vol.shape[2], ref_vol.shape[3]
+    # Only the grid shape matters here; the values are never read.
+    fix_grid = ref_vol[:, 0].transpose(2, 1, 0).astype(np.float32)
+
+    for HCR_round in pending:
+        name = get_round_folder_name(HCR_round, ref)
+        vol = tif_imread(round_to_rounds[HCR_round]['image_path'])
+        tx = _load_round_transform(full_manifest, HCR_round, round_to_rounds, reference_round)
+        n_c = vol.shape[1]
+        warped = np.zeros((n_z, n_c, n_y, n_x), dtype=vol.dtype)
+        for c in range(n_c):
+            write_path = tx['reg_path'] / f'warped_channel{c}.zarr'
+            shutil.rmtree(write_path, ignore_errors=True)
+            with cluster_constructor() as _clu:
+                out_zarr = distributed_apply_transform(
+                    fix_grid, vol[:, c].transpose(2, 1, 0).astype(np.float32),
+                    tx['fix_sp'], tx['mov_sp'], transform_list=[tx['affine'], tx['deform']],
+                    blocksize=tx['blocksize'], overlap=0, mov_margin=tx['mov_margin'],
+                    cluster=_clu, write_path=write_path, interpolator='1')
+            warped[:, c] = np.asarray(out_zarr).transpose(2, 1, 0).astype(vol.dtype)
+            shutil.rmtree(write_path, ignore_errors=True)
+        tif_imwrite(out_dir / f"{name}.tiff", warped, imagej=True)
+        rprint(f"  {name}: {n_c} channel(s) warped into the HCR{ref} frame")
 
 
 def _load_round_transform(full_manifest, HCR_round, round_to_rounds, reference_round):
@@ -233,7 +333,8 @@ def verify_rounds(full_manifest, parse_registered = False, print_rounds = False,
     manifest = full_manifest['data']
 
     # verify that all rounds exists.
-    reference_round_path, mov_rounds_path = HCR_confocal_imaging(manifest, only_paths=True)
+    reference_round_path, mov_rounds_path = HCR_confocal_imaging(
+        manifest, only_paths=True, require_all_rounds=not full_manifest.get('check_alignment'))
     reference_round_number = manifest['HCR_confocal_imaging']['reference_round']
     if print_rounds: print("\nRounds available:")
 
@@ -250,7 +351,7 @@ def verify_rounds(full_manifest, parse_registered = False, print_rounds = False,
             reference_round['image_path'] = reference_round_path
     
     ready_to_apply = []
-    if parse_registered:
+    if parse_registered and not full_manifest.get('check_alignment'):
         selected_registrations = parse_json(full_manifest['manifest_path'])['params']
         if 'HCR_selected_registrations' not in selected_registrations:
             return round_to_rounds, reference_round, ready_to_apply
@@ -267,6 +368,21 @@ def verify_rounds(full_manifest, parse_registered = False, print_rounds = False,
     return round_to_rounds, reference_round, ready_to_apply
 
 
+def publish_reference_round(full_manifest):
+    """Resolve the reference FISH volume and return its path.
+
+    The 2P->HCR landmark placement and the cascade that follows both read the
+    reference volume, and it is the acquired file verbatim -- no segmentation, no
+    round-to-round warp -- so they read it where it already is. This used to copy
+    it into full_registered_stacks/ to give BigWarp a predictable path; the copy
+    duplicated a whole volume per sample and the prompt prints the path anyway.
+    Resolving here keeps the call site, so the ordering in master_pipeline is
+    still free to change.
+    """
+    _, reference_round, _ = verify_rounds(full_manifest, func='publish-reference')
+    return Path(reference_round['image_path'])
+
+
 def register_rounds(full_manifest):
     
     """
@@ -275,14 +391,14 @@ def register_rounds(full_manifest):
     manifest = full_manifest['data']
     round_to_rounds, reference_round, ready_to_apply = verify_rounds(full_manifest)
 
-    # If only one round (reference), nothing to register — just copy reference and return
+    publish_reference_round(full_manifest)
+
+    if full_manifest.get('check_alignment'):
+        rprint("\n[bold cyan]Round-to-round registration deferred until the alignment check passes[/bold cyan]")
+        return
+
     if len(round_to_rounds) == 0:
         rprint("\n[bold cyan]Only one HCR round — skipping round-to-round registration[/bold cyan]")
-        reference_round_full_stack_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
-        reference_round_full_stack_path.parent.mkdir(parents=True, exist_ok=True)
-        if not reference_round_full_stack_path.exists():
-            shutil.copyfile(reference_round['image_path'], reference_round_full_stack_path)
-            rprint(f"[green]✓ Reference round HCR{reference_round['round']} copied to full_registered_stacks[/green]")
         return
 
     # Clean header
@@ -291,17 +407,10 @@ def register_rounds(full_manifest):
     rprint("="*80)
     rprint(f"Found {len(manifest['HCR_confocal_imaging']['rounds'])} HCR rounds in manifest")
 
-    # Ensure reference round is copied in case user has only Rounds = 1
-    reference_round_full_stack_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
-    if not reference_round_full_stack_path.exists():
-        reference_round_full_stack_path.parent.mkdir(parents=True, exist_ok=True)
-        rprint(f"[yellow]Copying reference round {reference_round['round']} to full_registered_stacks[/yellow]")
-        shutil.copyfile(reference_round['image_path'], reference_round_full_stack_path)
-        rprint(f"[green]✓ Reference round HCR{reference_round['round']} ready in full_registered_stacks[/green]")
-
-    # Choose method. Centroid (in-pipeline compute + review) when the manifest's
-    # HCR_to_HCR_registration has a centroid global+local block; otherwise fall back to the
-    # legacy notebook workflow (blob lives there for now -- removing blob later is one branch).
+    # Centroid registration (in-pipeline compute + review) runs when the manifest's
+    # HCR_to_HCR_registration carries a global+local block. Without one, the legacy
+    # notebook path is the only remaining option, and it raises unless the notebook
+    # result was already pasted into the manifest.
     try:
         from .hcr_centroid_registration import get_centroid_config
     except ImportError:
@@ -324,8 +433,25 @@ def register_rounds(full_manifest):
 
 def _register_rounds_legacy(full_manifest):
     """The original notebook-driven workflow: user runs the scan notebooks, hand-edits
-    HCR_selected_registrations, then the pipeline applies. Used for blob method and for
-    manifests with no centroid global/local block (backward compatible)."""
+    HCR_selected_registrations, then the pipeline applies. Reached only by manifests with
+    no centroid global/local block; the scan notebooks are not part of this release."""
+    # This path only works if the scan notebooks have already been run and their result
+    # pasted into the manifest. With neither a centroid block nor HCR_selected_registrations
+    # there is nothing to apply, and continuing would drop every non-reference round and
+    # still report success. Fail here rather than after a dead-end prompt.
+    selected = parse_json(full_manifest['manifest_path'])['params'].get('HCR_selected_registrations')
+    if not selected:
+        raise RuntimeError(
+            "This manifest has multiple HCR rounds but no usable round-to-round "
+            "registration config.\n"
+            f"  Manifest: {full_manifest['manifest_path']}\n"
+            "  params.HCR_to_HCR_registration has no centroid 'global'/'local' block, and\n"
+            "  params.HCR_selected_registrations is absent or empty.\n\n"
+            "Add the centroid 'global'/'local' block to register rounds in-pipeline -- see "
+            "examples/param_example.hjson for a documented copy of it.\n"
+            "Continuing would silently drop every non-reference round."
+        )
+
     rprint("Registration process uses step-by-step jupyter notebooks\n")
 
     rprint("[bold cyan] Step 1): Configure Low-Resolution Parameters[/bold cyan]")
@@ -340,7 +466,7 @@ def _register_rounds_legacy(full_manifest):
     rprint(f"   • Add 'HCR_selected_registrations' to: [yellow]{full_manifest['manifest_path']}[/yellow]")
     rprint("   • This will specify which rounds you want to register")
     rprint("\n[bold]Press [green]Enter[/green] when configuration is complete...[/bold]")
-    input()
+    pause()
 
     _, _, ready_to_apply = verify_rounds(full_manifest, parse_registered=True)
     rprint("[green]✅ Configuration loaded successfully[/green]\n")
@@ -349,7 +475,7 @@ def _register_rounds_legacy(full_manifest):
     if ready_to_apply:
         rprint(f"    Rounds ready for registration: [green]{', '.join(ready_to_apply)}[/green]")
         rprint("\n[bold]Press [green]Enter[/green] to apply registration matrix...[/bold]")
-        input()
+        pause()
         registration_apply(full_manifest)
         rprint("\n[green]✅ Registration applied successfully[/green]")
     else:
@@ -357,8 +483,14 @@ def _register_rounds_legacy(full_manifest):
 
 
 def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds):
-    """In-pipeline centroid registration: compute global+local candidates, show a ranked review
-    per round, auto-suggest the winner, write the chosen tag into the manifest, then apply."""
+    """In-pipeline centroid registration. TWO review points per round, both the same shape:
+    every candidate is computed and written to disk with a composite tiff, the metrics only
+    SUGGEST a row, and the user picks by index after inspecting the tiffs.
+
+      COARSE — asked mid-run (inside the driver, via the choose_global callback) because the
+               expensive deform is seeded by the chosen affine.
+      FINE   — asked here, once the blocksizes for that round are done.
+    """
     try:
         from .hcr_centroid_registration import run_hcr_centroid_registration
     except ImportError:
@@ -366,21 +498,35 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
 
     rprint("[bold]Computing centroid global + local registration (this runs the real pipeline; "
            "may take a while per round)...[/bold]")
-    results = run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds)
+    results = run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round,
+                                            gcfg, lcfg, ds, choose_global=_choose_global_interactive,
+                                            confirm_overwrite=_confirm_round_overwrite)
 
     chosen = {}   # round -> "global_tag/local_tag"
     for rnd, res in results.items():
+        if res.get('skipped'):
+            # Kept by the user at the overwrite gate: carry its existing selection forward so the
+            # apply step still runs, and don't re-ask either review question for it.
+            chosen[str(rnd)] = res['tag']
+            rprint(f"\n[bold]HCR{rnd} → HCR{reference_round['round']}[/bold] — kept existing "
+                   f"registration: [cyan]{res['tag']}[/cyan]")
+            continue
         cands = res.get('candidates', [])
         if not cands:
             rprint(f"[red]HCR{rnd}: no local candidates produced — skipping (check masks/logs)[/red]")
             continue
-        rprint(f"\n[bold]HCR{rnd} → HCR{reference_round['round']} — candidates (ranked by MI):[/bold]")
+        rprint(f"\n[bold]HCR{rnd} → HCR{reference_round['round']} — fine candidates "
+               f"(all saved; ranked by MI):[/bold]")
         rprint(f"  {'#':>2}  {'local config':<44}{'MI':>9}{'medResid':>10}{'frac<5':>8}{'coverage':>11}")
         for i, c in enumerate(cands):
+            mark = "  [b]◄ suggested[/b]" if i == 0 else ""
             rprint(f"  {i:>2}  {c['local_tag']:<44}{c.get('mi', float('nan')):>+9.3f}{c['medResid_um']:>9.2f}u"
-                   f"{c['frac_under5']*100:>6.0f}%{c['moved']:>7}/{c['total']:<3}")
+                   f"{c['frac_under5']*100:>6.0f}%{c['moved']:>7}/{c['total']:<3}{mark}")
+        rprint("  [dim]overlay images (open these before choosing):[/dim]")
+        for i, c in enumerate(cands):
+            rprint(f"  [dim]  [{i}] {c.get('composite') or '(write failed)'}[/dim]")
         rprint(f"  global: [cyan]{res['global_tag']}[/cyan] (r={res['radius_um']}um)  |  "
-               f"outputs+overlays under [dim]{Path(cands[0]['dir']).parent}[/dim]")
+               f"outputs under [dim]{Path(cands[0]['dir']).parent}[/dim]")
         # Surface the red-flag verdict so a bad registration isn't accepted blind.
         sev = res.get('severity', 0); flags = res.get('flags', [])
         _badge = {0: "[green]✓ OK[/green]", 1: "[yellow]⚠ WARN[/yellow]", 2: "[red]✗ RED FLAG[/red]"}[sev]
@@ -390,9 +536,14 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
         if sev == 2:
             rprint("  [red]↳ top pick is RED-FLAGGED — inspect the overlay before accepting.[/red]")
         best = cands[0]
-        rprint(f"  [green]Top pick → row 0:[/green] {best['local_tag']}")
-        rprint("  Press [green]Enter[/green] to accept, or type a row # / local_tag to override:")
-        chosen_cand = _resolve_candidate(input().strip(), cands)
+        rows = ", ".join(str(i) for i in range(len(cands)))
+        rprint(f"  [green]Suggested: row 0[/green] ({best['local_tag']})")
+        rprint("  Open the overlay images above. Press [green]Enter[/green] to accept the "
+               "suggested registration.")
+        rprint(f"  Otherwise, enter a row # ({rows}) to override:")
+        # pause(), not input(): drops Enters typed during the silent deform above, which would
+        # otherwise be read as "accept the suggestion" without the prompt ever stopping.
+        chosen_cand = _resolve_candidate(pause().strip(), cands)
         chosen[str(rnd)] = chosen_cand['tag']
         rprint(f"  [green]selected[/green] HCR{rnd}: {chosen_cand['tag']}")
 
@@ -407,6 +558,62 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
     verify_rounds(full_manifest, parse_registered=True, print_registered=True)
     registration_apply(full_manifest)
     rprint("\n[green]✅ Registration applied[/green]")
+
+
+def _confirm_round_overwrite(rnd, ref, done):
+    """Ask before recomputing a round that is ALREADY registered. True = redo it and overwrite,
+    False = keep what's there and move to the next round.
+
+    Called before that round's masks are loaded, so answering "keep" costs nothing: a re-run
+    previously repeated the full ~15 min deform and re-asked both review questions for every
+    finished round, with no way to say "that one's done, move on"."""
+    rprint(f"  [yellow]Already registered[/yellow] ([dim]{done['when']}[/dim]): "
+           f"[cyan]{done['tag']}[/cyan]")
+    rprint(f"  [dim]{done['dir']}[/dim]")
+    rprint("    y = re-run and overwrite above outputs")
+    rprint("    n = skip, keep above outputs")
+    # Neither answer is a default, so keep asking until one is given -- same loop as
+    # registrations_utils.check_overwrite, which asks this question for the 2P planes.
+    # pause() flushes each time round, so a stray Enter can neither trigger a 15-minute
+    # recompute nor spam the retry message once per queued newline.
+    while True:
+        resp = pause("  input [y/n]: ").strip().lower()
+        if resp in ('y', 'n'):
+            return resp == 'y'
+        rprint("    [yellow]Please enter y or n[/yellow]")
+
+
+def _choose_global_interactive(rnd, ref, gtable, sug):
+    """Blocking COARSE review, called from inside the centroid driver once every radius has its
+    _affine.mat + composite tiff on disk. The scored table and the composite paths have just been
+    printed by the driver, so this only asks. Returns the chosen row index.
+
+    Exists because the coarse metrics genuinely disagree: MI, mutual-inlier count and residual
+    can each favour a different radius, and MI is the tiebreak only by convention. Whoever is
+    looking at the overlays gets the last word."""
+    rows = ", ".join(str(i) for i in range(len(gtable)))
+    rprint(f"      [green]Suggested: row {sug}[/green] ({int(gtable[sug]['radius_um'])}µm)")
+    rprint("      Open the overlay images above. Press [green]Enter[/green] to accept the "
+           "suggested registration.")
+    rprint(f"      Otherwise, enter a row # ({rows}) to override:")
+    # pause(), not input(): drops Enters typed during the silent stage above, which would
+    # otherwise be read as "accept the suggestion" without the prompt ever stopping.
+    return _resolve_global(pause().strip(), gtable, sug)
+
+
+def _resolve_global(sel, gtable, sug):
+    """Map a coarse review reply to a row index: empty -> suggested; a row # -> that row;
+    a radius ('60', '60um', '60µm') or a global tag -> the matching row."""
+    if not sel:
+        return sug
+    if sel.isdigit() and int(sel) < len(gtable):      # radii are tens of µm, so a small int is a row #
+        return int(sel)
+    norm = sel.lower().rstrip('m').rstrip('uµ')       # '60um'/'60µm'/'60u' -> '60'
+    for i, r in enumerate(gtable):
+        if norm == str(int(r['radius_um'])) or sel == (r.get('tag') or ''):
+            return i
+    rprint(f"      [yellow]'{sel}' not recognised — using suggested row {sug}[/yellow]")
+    return sug
 
 
 def _resolve_candidate(sel, cands):
@@ -809,6 +1016,88 @@ def register_lowres_to_hires(full_manifest, session):
     rprint(f"[green]Low-res to high-res registration complete.[/green] QA: {qa_dir.name}/")
 
 
+def lowres_rotated_image(full_manifest, plane):
+    """Rotated low-res 2P mean image for the given plane.
+
+    _rotate_plane names its output after the channel set it was handed, so a
+    two-channel input lands as ..._C01_..._rotated.tiff and a single-channel one as
+    ..._C0_..._rotated.tiff. Prefer two channels when present: green plus red is
+    easier to landmark against the HCR volume than green alone.
+    """
+    reg_dir = output_root(full_manifest) / '2P' / 'registered'
+    for channels in ('C01', 'C0'):
+        candidate = reg_dir / f'lowres_meanImg_{channels}_plane{plane}_rotated.tiff'
+        if candidate.exists():
+            return candidate
+    return reg_dir / f'lowres_meanImg_C0_plane{plane}_rotated.tiff'
+
+
+def ensure_twop_to_hcr_landmarks(full_manifest, has_hires, reference_plane,
+                                 reference_round=None, automation_enabled=False):
+    """Resolve the 2P->HCR landmark file, prompting for BigWarp if it is missing.
+
+    Split out of twop_to_hcr_registration so the manual placement can happen before
+    any segmentation runs. Both images BigWarp opens are intensity data that exists
+    straight out of the per-plane prep: the acquired FISH volume itself, and the
+    rotated 2P mean (or the stitched hi-res image).
+    Nothing here reads cellpose output -- the masks are consumed by the cascade
+    downstream, once the landmarks exist.
+
+    Returns (landmarks_path, landmarks_source, twop_ref_image_path). Idempotent:
+    twop_to_hcr_registration calls it again and finds the file already placed.
+    """
+    if reference_round is None:
+        _, reference_round, _ = verify_rounds(full_manifest, func='landmark-check')
+
+    # The acquired reference volume, read where it already lives. This is one of
+    # the two images BigWarp opens; the prompt below prints the full path.
+    hcr_ref_round_path = Path(reference_round['image_path'])
+    landmarks_dir = output_root(full_manifest) / '2P' / 'registered'
+    # Reference round number for file naming (strip leading zeros: "01" -> "1")
+    hcr_ref = str(int(reference_round['round']))
+
+    # WORKFLOW DETECTION: which 2P image the landmarks are placed on.
+    if has_hires:
+        twop_ref_image_path = landmarks_dir / f'hires_stitched_plane{reference_plane}_rotated.tiff'
+        prefix, image_label = "hires_stitched_", "HIGH-RES STITCHED 2P image"
+        rprint(f"[dim]Mode: high-res stitched[/dim]")
+    else:
+        # The rotated mean image, not the rotated masks: landmarks go on intensity,
+        # and this file is written by the per-plane prep before cellpose runs.
+        twop_ref_image_path = lowres_rotated_image(full_manifest, reference_plane)
+        prefix, image_label = "", "LOW-RES 2P mean image"
+        rprint(f"[dim]Mode: standard low-res[/dim]")
+
+    landmarks_path, landmarks_source = auto.find_landmark_file(
+        landmarks_dir, reference_plane, prefix=prefix, hcr_ref=hcr_ref)
+
+    if landmarks_path is None:
+        expected_path = landmarks_dir / f"{prefix}plane{reference_plane}_to_HCR{hcr_ref}_landmarks.csv"
+
+        # Landmarks are required in both manual and auto mode
+        # (auto mode refines them, but still needs them as a starting point)
+        mode_note = "\n  (auto mode will refine these)" if automation_enabled else ""
+        instructions = (
+            f"In BigWarp, open these two images:\n"
+            f"  Moving: {twop_ref_image_path}\n"
+            f"  Target: {hcr_ref_round_path}\n\n"
+            f"  Place landmarks mapping the {image_label} to the HCR reference round.{mode_note}"
+        )
+
+        auto.prompt_for_missing_file(
+            expected_path,
+            f"2P-to-HCR landmarks for Plane {reference_plane}",
+            instructions=instructions
+        )
+
+        # Re-check after user creates file
+        landmarks_path, landmarks_source = auto.find_landmark_file(
+            landmarks_dir, reference_plane, prefix=prefix, hcr_ref=hcr_ref)
+
+    rprint(f"[dim]Using {landmarks_source} landmarks: {landmarks_path.name}[/dim]")
+    return landmarks_path, landmarks_source, twop_ref_image_path
+
+
 def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation_enabled=False):
     """
     Register 2P masks to HCR reference space.
@@ -896,7 +1185,10 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
 
     # Cascade per-tile search sizing (manifest-overridable presets):
     # XY_TILE_RATIO    : stage-0 search_xy = tile_size * ratio; also caps stages 1+
-    # Z_TILE_RATIO     : stage-0 search_z  = max(SEARCH_Z_MIN, round(tile_size * ratio))
+    # Z_TILE_RATIO     : stage-0 search_z  = max(SEARCH_Z_MIN, round(tile_size * ratio)).
+    #                    NOTE: unlike search_xy, this has no upper cap -- for the shipped
+    #                    [300,100,50] cascade the SEARCH_Z_MIN floor dominates almost
+    #                    entirely (see compute_adaptive_matching_params docstring / backlog #3).
     # SEARCH_Z_MIN/MAX : floor (stage 0) and cap (stages 1+) for per-tile Z search
     XY_TILE_RATIO = reg_params.get('xy_tile_ratio', 0.4)
     Z_TILE_RATIO  = reg_params.get('z_tile_ratio',  0.01)
@@ -952,69 +1244,14 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     round_to_rounds, reference_round, register_rounds = verify_rounds(full_manifest, parse_registered = True,
                                                                     print_rounds = False, print_registered = False)
 
-    # HCR paths
-    hcr_ref_round_path = output_root(full_manifest) / 'HCR' / 'full_registered_stacks' / f"HCR{reference_round['round']}.tiff"
+    # HCR paths. The masks are only read further down, after the landmarks are in
+    # hand -- see ensure_twop_to_hcr_landmarks for why that matters.
+    hcr_ref_round_path = Path(reference_round['image_path'])
     hcr_ref_masks_path = output_root(full_manifest) / 'HCR' / 'cellpose_aligned' / f"HCR{reference_round['round']}_masks.tiff"
 
-    # WORKFLOW DETECTION: Choose reference image and landmarks based on has_hires
-    landmarks_dir = output_root(full_manifest) / '2P' / 'registered'
-    # Reference round number for file naming (strip leading zeros: "01" -> "1")
-    hcr_ref = str(int(reference_round['round']))
-
-    if has_hires:
-        twop_ref_image_path = output_root(full_manifest) / '2P' / 'registered' / f'hires_stitched_plane{REFERENCE_PLANE}_rotated.tiff'
-        landmarks_path, landmarks_source = auto.find_landmark_file(
-            landmarks_dir, REFERENCE_PLANE, prefix="hires_stitched_", hcr_ref=hcr_ref
-        )
-        rprint(f"[dim]Mode: high-res stitched[/dim]")
-    else:
-        twop_ref_image_path = output_root(full_manifest) / '2P' / 'cellpose' / f'lowres_meanImg_C0_plane{REFERENCE_PLANE}_seg_rotated.tiff'
-        landmarks_path, landmarks_source = auto.find_landmark_file(
-            landmarks_dir, REFERENCE_PLANE, prefix="", hcr_ref=hcr_ref
-        )
-        rprint(f"[dim]Mode: standard low-res[/dim]")
-
-    # Check if landmarks exist
-    if landmarks_path is None:
-        expected_name = f"{'hires_stitched_' if has_hires else ''}plane{REFERENCE_PLANE}_to_HCR{hcr_ref}_landmarks.csv"
-        expected_path = landmarks_dir / expected_name
-
-        # Landmarks are required in both manual and auto mode
-        # (auto mode refines them, but still needs them as a starting point)
-        mode_note = "\n  (auto mode will refine these)" if automation_enabled else ""
-
-        # Build clear instructions telling user which files to open in BigWarp
-        if has_hires:
-            twop_file = f"hires_stitched_plane{REFERENCE_PLANE}_rotated.tiff"
-            twop_file_path = output_root(full_manifest) / '2P' / 'registered' / twop_file
-            instructions = (
-                f"In BigWarp, open these two images:\n"
-                f"  Moving: {twop_file_path}\n"
-                f"  Target: {hcr_ref_round_path}\n\n"
-                f"  Place landmarks mapping the HIGH-RES STITCHED 2P image to the HCR reference round.{mode_note}"
-            )
-        else:
-            twop_file = f"lowres_meanImg_C0_plane{REFERENCE_PLANE}_seg_rotated.tiff"
-            twop_file_path = output_root(full_manifest) / '2P' / 'cellpose' / twop_file
-            instructions = (
-                f"In BigWarp, open these two images:\n"
-                f"  Moving: {twop_file_path}\n"
-                f"  Target: {hcr_ref_round_path}\n\n"
-                f"  Place landmarks mapping the LOW-RES 2P image to the HCR reference round.{mode_note}"
-            )
-
-        auto.prompt_for_missing_file(
-            expected_path,
-            f"2P-to-HCR landmarks for Plane {REFERENCE_PLANE}",
-            instructions=instructions
-        )
-
-        # Re-check after user creates file
-        landmarks_path, landmarks_source = auto.find_landmark_file(
-            landmarks_dir, REFERENCE_PLANE, prefix="hires_stitched_" if has_hires else "", hcr_ref=hcr_ref
-        )
-
-    rprint(f"[dim]Using {landmarks_source} landmarks: {landmarks_path.name}[/dim]")
+    landmarks_path, landmarks_source, twop_ref_image_path = ensure_twop_to_hcr_landmarks(
+        full_manifest, has_hires, REFERENCE_PLANE,
+        reference_round=reference_round, automation_enabled=automation_enabled)
 
     # Create output folders
     output_folder = output_root(full_manifest) / 'MERGED' / 'aligned_masks'
@@ -1024,7 +1261,8 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     # HCR resolution: TIFF metadata is the source of truth; manifest entry is an
     # optional override that emits a loud warning on mismatch.
     manifest_resolution = full_manifest['data']['HCR_confocal_imaging']['rounds'][0].get('resolution')
-    hcr_resolution = resolve_hcr_resolution(hcr_ref_round_path, manifest_resolution)
+    hcr_resolution = resolve_hcr_resolution(hcr_ref_round_path, manifest_resolution,
+                                            require_metadata=True)
     landmarks_df = load_landmarks(landmarks_path, hcr_resolution)
     rprint(f"[dim]Loaded {len(landmarks_df)} landmarks[/dim]")
 
@@ -1042,8 +1280,18 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     # Check if z-flip is needed (some acquisitions have inverted z)
     flip_z = reg_params.get('flip_z', False)
     if flip_z:
-        hcr_ref_masks = hcr_ref_masks[::-1].copy()
-        rprint(f"[yellow]  Z-axis flipped (flip_z=true in manifest)[/yellow]")
+        # This is the only place flip_z is read, and it flips only this local
+        # copy of the HCR reference masks. Every downstream consumer -- probe
+        # intensity extraction, mask matching, the merged table -- reads the
+        # unflipped volume, so the QA overlays would look right while the
+        # per-cell table silently paired 2P cells with the wrong z.
+        raise NotImplementedError(
+            "params.twop_to_hcr_registration.flip_z is not supported.\n"
+            "It flips the HCR reference masks used for registration but not the "
+            "volume every later stage reads, which produces correct-looking QA "
+            "overlays and an incorrect merged table.\n"
+            "Flip the HCR volume on disk before running the pipeline instead."
+        )
     y1, x1 = hcr_ref_masks.shape[1], hcr_ref_masks.shape[2]
     rprint(f"[dim]  HCR masks shape: {hcr_ref_masks.shape} (Z={hcr_ref_masks.shape[0]}, Y={y1}, X={x1})[/dim]")
 
@@ -1198,7 +1446,8 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             rprint(f"  [yellow]Coarse patch reduced to {2 * _prc}px (crop={min_dim}px)[/yellow]")
 
         # ---- AFFINE PASS 1: Coarse matching + RANSAC ----
-        rprint(f"  [dim]Affine Pass 1: {2 * _prc}px patches, +/-{SEARCH_XY_COARSE}px search[/dim]")
+        rprint("  [dim]Affine pass[/dim]")
+        _detail(f"    patches {2 * _prc}px, search +/-{SEARCH_XY_COARSE}px")
         cell_results_coarse = find_cell_displacements(
             twop_crop_binary, twop_crop_labels, hcr_crop_3d, z_map_crop, centroids_crop,
             patch_radius=_prc, search_xy=SEARCH_XY_COARSE,
@@ -1324,8 +1573,9 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
                                 f'crop_origin_yx=({oy},{ox})'),
             }
             tif_imwrite(str(stage_path), stack, imagej=True, metadata=meta)
-            rprint(f"  [dim]stage '{stage_name}' → {stage_path.name} "
-                   f"(IoU {snap['iou']:.3f})[/dim]")
+            # The IoU is already reported by the per-stage line above; this is
+            # just where the QA tiff landed.
+            _detail(f"  stage '{stage_name}' -> {stage_path.name} (IoU {snap['iou']:.3f})")
 
         # ---- CASCADE SNAPSHOTS (for cp4-eval and future regression checks) ----
         # Captures the alignment state at each named stage so a comparison
@@ -1370,7 +1620,8 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
                 tile_ratio=XY_TILE_RATIO, z_tile_ratio=Z_TILE_RATIO,
                 search_z_min=SEARCH_Z_MIN, search_z_max=SEARCH_Z_MAX)
 
-            rprint(f"  [dim]Tiles {tile_size}px: {2 * patch_r}px patches, +/-{search_xy}px search, z+/-{search_z}[/dim]")
+            rprint(f"  [dim]Tiles {tile_size}px[/dim]")
+            _detail(f"    patches {2 * patch_r}px, search +/-{search_xy}px, z +/-{search_z}")
             centroids_cur = extract_centroids(cascade_state['twop_labels'])
             if len(centroids_cur) == 0:
                 continue
@@ -1506,7 +1757,7 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
                     'full_hcr_shape': (int(y1), int(x1)),
                 },
             }, _f)
-        rprint(f"  [dim]Cascade snapshots → {snapshots_path.name}[/dim]")
+        _detail(f"  Cascade snapshots -> {snapshots_path.name}")
 
         # ---- UNCROP: Compose displacement fields back to full HCR space ----
         # Total displacement in inner-crop space
@@ -1692,6 +1943,13 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
         dst_z = orig_landmarks[7].values if orig_landmarks.shape[1] > 7 else np.zeros(len(orig_landmarks))
 
     prefix = "hires_stitched_" if has_hires else ""
+    # Both of these used to be inherited from the landmark-resolution code that ran
+    # earlier in this same function. That code is now ensure_twop_to_hcr_landmarks,
+    # so they have to be rebuilt here -- the automation block below writes
+    # {prefix}plane{N}_to_HCR{ref}_auto.csv and needs the same directory and the
+    # same zero-stripped round number the landmark filenames use.
+    landmarks_dir = output_root(full_manifest) / '2P' / 'registered'
+    hcr_ref = str(int(reference_round['round']))
     hcr_res_x, hcr_res_y, hcr_res_z = hcr_resolution[0], hcr_resolution[1], hcr_resolution[2]
 
     for plane in TARGET_PLANES:
@@ -1733,13 +1991,21 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             qa_paths, ref_auto_path, "2P-to-HCR", REFERENCE_PLANE
         )
 
+        # Returning here would only exit this function: the aligned volume is
+        # already written, and the caller would go on to match, merge and report
+        # success on an alignment the user just rejected. Stop the run instead.
         if choice == "skip":
-            rprint(f"[yellow]Registration skipped by user. Outputs remain but may need re-running.[/yellow]")
-            return
+            raise SystemExit(
+                "\nRegistration skipped at the QA checkpoint.\n"
+                "The aligned volume and QA overlays for this plane are on disk, but nothing "
+                "downstream has run -- matching and merging on a rejected alignment would "
+                "produce a table that looks complete and is not.\n"
+                f"  Landmarks: {ref_auto_path}")
         elif choice == "refine":
-            rprint(f"[yellow]Refinement requested. Re-run pipeline with updated landmarks.[/yellow]")
-            rprint(f"[yellow]Per-plane _auto.csv files saved. Edit and re-run to apply changes.[/yellow]")
-            return
+            raise SystemExit(
+                "\nRefinement requested at the QA checkpoint.\n"
+                "Per-plane _auto.csv landmarks are saved. Edit them and re-run to apply.\n"
+                f"  Landmarks: {ref_auto_path}")
         # accept: continue normally
     elif not automation_enabled and CURRENT_PLANE == REFERENCE_PLANE:
         # Only prompt for review on reference plane in manual mode
@@ -1748,7 +2014,7 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
         rprint(f"  Directory: [yellow]{qa_folder}[/yellow]")
         rprint(f"  [dim]Ch1=HCR (magenta), Ch2=2P (green)[/dim]")
         rprint("\nPress [green]Enter[/green] to continue with mask matching...")
-        input()
+        pause()
 
 
 

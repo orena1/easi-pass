@@ -6,14 +6,14 @@
     //  volume). Full walkthrough + expected output: demo/README.md
     //
     //  Run (from the repo root, in the cp4 / cellpose-SAM env):
-    //    python master_pipeline.py --manifest demo/JS078_demo.hjson --tiff_only
+    //    python master_pipeline.py --manifest demo/JS078_demo.hjson
     // =====================================================================
 
     data: {
         // EDIT THIS to the absolute path of demo/demo_pre_run on your machine
         // (fetch_demo_data.py downloads the data into that folder).
         // e.g. "/home/you/ezfish_pipeline/demo/demo_pre_run"
-        base_path: "/EDIT_ME/ezfish_pipeline/demo/demo_pre_run"
+        base_path: "demo_pre_run"      // relative to this file; nothing to edit
         mouse_name: "JS078_demo"
 
         two_photon_imaging: {
@@ -52,7 +52,7 @@
         // ---- Registration ----
         HCR_to_HCR_registration: { downsampling: [3, 3, 2] }   // (single round here -> near identity)
         twop_to_hcr_registration: { erosion: 0, erosion_hcr: 0 }
-        lowres_to_hires_registration: { tile_size: 454, tile_overlap: 0.3, percentile_norm: [2, 98], max_tile_shift: 40, min_matches: 3 }
+        lowres_to_hires_registration: { tile_size: 454, tile_overlap: 0.3, percentile_norm: [2, 98], min_matches: 3 }
 
         // Geometric 2P->HCR matcher that runs alongside IoU (adds somaprint columns).
         somaprint: { enabled: true }

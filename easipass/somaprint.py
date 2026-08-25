@@ -10,8 +10,7 @@ A small number of refinement rounds re-scores using only confirmed
 identity-paired neighbors instead of geometric neighbors.
 
 Validated against the IoU baseline on JS078 (98-99% concordance at
-IoU>=0, zero FAR-disagreements; see
-figure_notebooks/figure_4_cortex/somaprint_tests/somaprint_cross_mouse.ipynb).
+IoU>=0, zero FAR-disagreements).
 Inputs come from twop_to_hcr_registration outputs
 (twop_plane{P}_aligned_3d.tiff + twop_plane{P}_registration_params.npz)
 and HCR cellpose masks (HCR{R}_masks.tiff); the matcher itself adds no
@@ -538,7 +537,16 @@ def _curate_with_gmm(best_score: np.ndarray,
 
     try:
         gmm = GaussianMixture(n_components=2, random_state=0).fit(best_v.reshape(-1, 1))
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        # This changes what "confident" means: the likelihood-ratio gate below
+        # asks whether a score is better explained by the match component than
+        # by the within-plane null, whereas this fallback simply keeps the top
+        # quartile. The two are not comparable, so say so rather than let the
+        # column change definition silently.
+        rprint(f"[yellow]  [WARN] Somaprint: GMM fit failed ({type(exc).__name__}: {exc}); "
+               "falling back to a top-25% score cut. 'somaprint_confident' for this plane "
+               "is a percentile cut, NOT the likelihood-ratio gate -- the two are not "
+               "comparable across planes.[/yellow]")
         threshold = float(np.percentile(best_v, 75))
         return {int(vi): int(best_partner[vi])
                 for vi in np.where(valid_mask)[0]

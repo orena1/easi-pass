@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use EASI-PASS, please cite it using these metadata."
+title: "EASI-PASS"
+abstract: >-
+  A pipeline for registering in vivo two-photon functional imaging to ex vivo
+  HCR/FISH confocal volumes, segmenting cells in both, matching them one-to-one,
+  and producing a per-cell table that joins functional identity to gene channels.
+type: software
+license: BSD-3-Clause
+version: "0.1.0"
+
+# Software authors. The paper's full author list belongs in preferred-citation.
+authors:
+  - family-names: Singh
+    given-names: Jonna
+    email: jsinghal@bidmc.harvard.edu
+    affiliation: "Beth Israel Deaconess Medical Center"
+  - family-names: Amsalem
+    given-names: Oren
+    email: oren.a4@gmail.com
+
+repository-code: "https://github.com/orena1/easi-pass"
+
+keywords:
+  - two-photon imaging
+  - HCR
+  - FISH
+  - image registration
+  - cell segmentation
+  - neuroscience
+
+# TODO on publication: fill in and uncomment, so citing the software resolves to
+# the paper.
+# preferred-citation:
+#   type: article
+#   title: ""
+#   authors: []
+#   journal: ""
+#   year:
+#   doi: ""

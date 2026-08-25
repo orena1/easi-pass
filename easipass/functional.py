@@ -4,10 +4,10 @@ import numpy as np
 from skimage.transform import rotate
 try:
     from .registrations import verify_rounds  # Relative import (running as part of a package)
-    from .meta import check_rotation, get_rotation_config, parse_json, output_root, rprint, track
+    from .meta import check_rotation, get_rotation_config, parse_json, output_root, rprint, track, pause
 except ImportError:
     from registrations import verify_rounds  # Absolute import (running in Jupyter notebook)
-    from meta import check_rotation, get_rotation_config, parse_json, output_root, rprint, track
+    from meta import check_rotation, get_rotation_config, parse_json, output_root, rprint, track, pause
 from tifffile import imread as tif_imread
 from tifffile import imwrite as tif_imwrite
 from sbxreader import sbx_get_metadata, sbx_memmap
@@ -177,25 +177,24 @@ def _rotate_plane(full_manifest, save_filename_C, save_path_registered, function
     elif not any_rotated_exists:
         reference_HCR_round = verify_rounds(full_manifest)[1]['image_path']
 
+        # Flips are the only thing that MUST be settled here -- BigWarp cannot mirror
+        # an image, so a wrong flip is unrecoverable downstream. Rotation is carried by
+        # the landmarks, so the prompt deliberately does not raise it: mentioning the
+        # manifest's rotation field here only invites "does BigWarp update that?".
         print('')
         print('=' * 70)
-        print(f'  ROTATION SETUP — {full_manifest["data"]["mouse_name"]}')
+        print(f'  ORIENTATION — {full_manifest["data"]["mouse_name"]} plane {functional_plane}')
         print('=' * 70)
-        print(f'  No rotated image found for plane {functional_plane}.')
-        print(f'  Before applying rotation, check your unrotated 2P image:')
-        print(f'')
-        print(f'    {save_filename_C}')
-        print(f'')
-        print(f'  Compare it to the HCR reference round:')
-        print(f'')
-        print(f'    {reference_HCR_round}')
-        print(f'')
-        print(f'  Then update rotation_2p_to_HCR in your manifest:')
+        print(f'    2P:   {save_filename_C}')
+        print(f'    HCR:  {reference_HCR_round}')
+        print('')
+        print('  Check the 2P and HCR images. If required, insert any horizontal')
+        print('  ("fliplr": true) or vertical ("flipud": true) flips into:')
         print(f'    {manifest_path}')
-        print(f'')
-        print(f'  Set "rotation" (degrees), "fliplr" (true/false), "flipud" (true/false)')
+        print('')
+        print('  Rotation is handled during landmarking - you do not need to set it here.')
         print('=' * 70)
-        input('  Press Enter after updating the manifest...\n')
+        pause('  Press Enter when done > ')
 
     # Always re-read manifest from disk before applying rotation so that any
     # edits the user made during an earlier prompt (e.g. during hires stitching
@@ -205,11 +204,23 @@ def _rotate_plane(full_manifest, save_filename_C, save_path_registered, function
     # Apply rotation
     data = tif_imread(str(save_filename_C))
     print(f"  Loaded {save_filename_C.name if hasattr(save_filename_C, 'name') else save_filename_C}: shape={data.shape}, dtype={data.dtype}")
-    # Hires tiff inputs may be multi-dimensional (ZCYX, CYX, etc.) — reduce to 2D
+    # Hires tiff inputs may be multi-dimensional (ZCYX, CYX, etc.). Reduce the genuine
+    # extra dimensions but KEEP a leading channel axis: the anatomical hires is green +
+    # red, and red is what makes the flip/rotation judgeable against HCR in BigWarp.
+    # The rotation below is already channel-aware (rotates per channel, writes CYX), and
+    # prepare_tiff_input uses this same shape[0] in (1, 2) convention to autodetect
+    # channels on the lowres input. Collapsing to data[0] here dropped red silently.
     if output_name:
-        while data.ndim > 2:
+        while data.ndim > 3:
             print(f"  Reducing {data.ndim}D array (shape {data.shape}) → taking [0]")
             data = data[0]
+        if data.ndim == 3 and data.shape[0] > 2:
+            print(f"  Reducing Z stack (shape {data.shape}) → taking [0]")
+            data = data[0]
+        if data.ndim == 3 and data.shape[0] == 1:
+            data = data[0]
+        if data.ndim == 3:
+            print(f"  Keeping {data.shape[0]} channels (shape {data.shape})")
     if data.ndim not in (2, 3):
         raise ValueError(f"Unexpected image dimensions {data.ndim} (shape {data.shape}) for {save_filename_C}")
     for k in rotation_config:

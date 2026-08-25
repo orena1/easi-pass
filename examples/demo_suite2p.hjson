@@ -1,15 +1,24 @@
 {
-    // EASI-PASS — FISH rounds only, no functional data. Copy, edit the paths, run:
-    //   python master_pipeline.py --manifest your_file.hjson
+    // EASI-PASS — reading the 2P mean image from an existing Suite2p folder.
+    // Otherwise identical to demo_tiff.hjson.
     //
-    // Inputs:  {base_path}/{sample_name}/HCR/HCR{R}.tiff   (one per round)
+    // Inputs:  {base_path}/{sample_name}/2P/suite2p/plane{N}/ops.npy   (meanImg is read)
+    //          {base_path}/{sample_name}/HCR/HCR{R}.tiff  (one per round)
     //
-    // Rounds are registered to the reference, segmented, and matched to each other.
-    // With no two_photon_imaging section, --only_hcr is inferred.
+    // Note Suite2p's folder is plane{N}; the tiff path uses plane_{N}.tiff.
 
     data: {
         base_path: "/path/to/your/data"     // the folder that contains {sample_name}/
         sample_name: "MOUSE001"
+
+        two_photon_imaging: {
+            sessions: [
+                {
+                    input_format: "suite2p"
+                    functional_planes: ["0"]
+                }
+            ]
+        }
 
         HCR_confocal_imaging: {
             rounds: [
@@ -23,13 +32,7 @@
                     channels: ["DAPI", "PROBE_C", "PROBE_D"]
                     resolution: [1.515, 1.515, 5.0]
                 }
-                {
-                    round: "03"
-                    channels: ["DAPI", "PROBE_E", "PROBE_F"]
-                    resolution: [1.515, 1.515, 5.0]
-                }
             ]
-
             reference_round: "01"
         }
     }
@@ -55,6 +58,13 @@
             }
         }
 
+        // Coarse 2P orientation relative to the FISH volume, applied before landmarks.
+        rotation_2p_to_HCR: { rotation: 0, fliplr: false, flipud: false }
+
+        twop_to_hcr_registration: {
+            cascade_stages: [300, 100, 50]   // local tile sizes, px
+        }
+
         // "cpsam" is cellpose-SAM, downloaded on first run. Or give a path to your own model.
         HCR_cellpose: {
             model_path: "cpsam"
@@ -63,6 +73,15 @@
             gpu: true
             flow_threshold: 0.5
             cellprob_threshold: -0.5
+        }
+
+        2p_cellpose: {
+            model_path: "cpsam"
+            cellpose_channel: 0
+            diameter: 7
+            gpu: true
+            flow_threshold: 0
+            cellprob_threshold: -1
         }
 
         intensity_extraction: {
