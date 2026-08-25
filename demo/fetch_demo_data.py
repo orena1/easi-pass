@@ -30,19 +30,20 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-# --- Fill in after attaching the archives to a GitHub release ------------------
-# Create a release (e.g. tag v0.1.0), attach both zips, then replace OWNER/REPO/TAG
-# here and paste the two sha256sums below. Release asset URLs look like:
-#   https://github.com/OWNER/REPO/releases/download/TAG/JS078_demo_pre_run.zip
-RELEASE_BASE = "https://github.com/OWNER/REPO/releases/download/TAG"
+# Assets attached to the GitHub release. To publish a new version: rebuild the zip,
+# take its sha256sum, bump the tag here and paste the hash.
+RELEASE_BASE = "https://github.com/orena1/easi-pass/releases/download/v0.1.0"
 
 # Each archive extracts a "{name}/JS078_demo/" tree into demo/.
 ARCHIVES = {
     "demo_pre_run": {
         "url": f"{RELEASE_BASE}/JS078_demo_pre_run.zip",
-        "sha256": "PLACEHOLDER_SHA256_PRE_RUN",
+        "sha256": "1ac96d59bf7d52a522ac3ea0b963b15950b67c4d97c6c387407d863dccab011e",
         "marker": HERE / "demo_pre_run" / "JS078_demo" / "HCR" / "JS078_demo_HCR01.tiff",
     },
+    # Optional reference completion. Not published: the 398 KB golden CSV in
+    # completed/ answers the same question -- did my run come out right -- without
+    # a multi-gigabyte download.
     "demo_post_run": {
         "url": f"{RELEASE_BASE}/JS078_demo_post_run.zip",
         "sha256": "PLACEHOLDER_SHA256_POST_RUN",
@@ -75,6 +76,13 @@ def fetch(name: str, spec: dict, force: bool):
         print(f"{name}: already present (use --force to re-download).")
         return
     if "OWNER/REPO" in spec["url"] or "PLACEHOLDER" in spec["sha256"]:
+        if name == "demo_post_run":
+            sys.exit(
+                "demo_post_run is not published: it is a multi-gigabyte copy of a finished\n"
+                "run, and demo/completed/twop_plane0_to_HCR01.csv answers the same question\n"
+                "-- did my run come out right -- in 398 KB. Compare against that instead.\n"
+                "See demo/completed/README.md for the numbers to expect."
+            )
         sys.exit(
             f"{name}: the release asset is not published yet.\n"
             "Generate the data locally with make_demo_data.py, or check the repo's\n"
