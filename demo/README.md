@@ -6,7 +6,7 @@ it to a full-frame HCR confocal volume, segments cells in both, matches them, an
 a per-cell table joining 2P identity to the 5 HCR gene channels.
 
 This is the **stills / image-align** use case (`input_format: "tiff"`): a static 2P image, not a
-movie, so there are no activity traces — just cross-modal alignment + the molecular join.
+movie, so there are no activity traces, just cross-modal alignment and the molecular join.
 
 ## What's in this folder
 
@@ -30,14 +30,15 @@ demo/
 ```
 
 You run the pipeline on **`demo_pre_run/`**, then compare your result against the golden
-table in **`completed/`** — 398 KB, tracked in git, so the check costs no download. Only
+table in **`completed/`**, which is 398 KB and tracked in git, so the check costs no
+download. Only
 the text files and that table are in the repo; the imaging data is a GitHub release asset
 fetched by `fetch_demo_data.py`.
 
 ## Prerequisites
 
 - The pipeline environment with **Cellpose 4 / cellpose-SAM** (the demo manifest uses
-  `model_path: "cpsam"`, which auto-downloads — no model files to place). See the repo
+  `model_path: "cpsam"`, which auto-downloads, so there are no model files to place). See the repo
   README's install section for the conda env.
 - A GPU is recommended (`gpu: true` in the manifest); set `gpu: false` to run on CPU (slower).
 
@@ -78,13 +79,13 @@ OUTPUT/2P/registered/QualityCheck/plane0_AFTER_registration_overlay.tiff   # vis
 ```
 Compare `twop_plane0_to_HCR01.csv` against the golden copy in **`completed/`**
 (`twop_plane0_to_HCR01.csv` + expected numbers in `completed/README.md`). Cell counts
-and matches should be close; exact values depend on GPU / Cellpose version. The healthy
+and matches should be close; exact values depend on GPU and Cellpose version. The healthy
 signal is a 2P→HCR cascade `Final: IoU ~0.48` with an accepted small global shift.
 
 ## Regenerating the demo data (maintainers)
 
-`demo_pre_run/` is a *subset* of the full-resolution JS078 dataset — one functional plane
-(plane 0) and one HCR round (01) — assembled with:
+`demo_pre_run/` is a subset of the full-resolution JS078 dataset: one functional plane
+(plane 0) and one HCR round (01), assembled with:
 ```bash
 python make_demo_data.py \
   --src /path/to/EASI_FISH/pipeline/JS078 \
@@ -93,13 +94,13 @@ python make_demo_data.py \
 The golden table in `completed/` is the match CSV from a validated run of that data; it is
 what users diff against. Build the release archive as noted in `fetch_demo_data.py`, attach
 it to a GitHub release, and update `RELEASE_BASE` and the sha256 there.
-Everything is shipped at **full resolution and full frame** — the HCR volume is copied
+Everything is shipped at full resolution and full frame. The HCR volume is copied
 verbatim (~774 MB, all 5 gene channels, all 39 Z slices), and the BigWarp landmarks are
 copied verbatim (no coordinate shift, since nothing is cropped).
 
 **Why no spatial crop:** an earlier version XY-cropped the HCR volume to save size, but
 2P→HCR registration needs the surrounding HCR image context (and several landmark cells
-sit near the tissue edge). Cropping halved alignment quality — plane0 best-match median
-IoU dropped 0.38 → 0.16 vs the uncropped run — and made the overlay masks look
+sit near the tissue edge). Cropping halved alignment quality (plane0 best-match median
+IoU dropped 0.38 to 0.16 versus the uncropped run) and made the overlay masks look
 misaligned. The data is a release asset, not a tracked file, so full-frame size is not a
 repo concern.
