@@ -279,14 +279,13 @@ def main(args = None):
         # Now do low-res to high-res registration for ALL planes at once
         # Method depends on automation config: 'landmarks' (default) or 'auto' (SIFT-based)
         if has_hires:
-            # Temporarily set session to have all planes for registration
+            # This step handles every plane at once, so it needs a session that says so.
+            # The copy inherits whatever plane the loop above finished on, which is
+            # meaningless here -- both plane keys are set explicitly so a reader of
+            # either one gets the reference plane, not the last one segmented.
             session_with_all_planes = session.copy()
-            if 'functional_planes' in full_manifest['data']['two_photon_imaging']['sessions'][0]:
-                # Already has functional_planes
-                pass
-            else:
-                # Add additional_functional_planes to session for registration
-                session_with_all_planes['functional_plane'] = [reference_plane]
+            session_with_all_planes['functional_plane'] = [reference_plane]
+            if 'functional_planes' not in full_manifest['data']['two_photon_imaging']['sessions'][0]:
                 session_with_all_planes['additional_functional_planes'] = [p for p in all_planes if p != reference_plane]
 
             lowres_method = automation.get('lowres_to_hires', 'manual')
@@ -299,8 +298,8 @@ def main(args = None):
         else:
             # Standard mode: create rotated masks (in hi-res mode, register_lowres_to_hires does this)
             session_with_all_planes = session.copy()
+            session_with_all_planes['functional_plane'] = [reference_plane]
             if 'functional_planes' not in full_manifest['data']['two_photon_imaging']['sessions'][0]:
-                session_with_all_planes['functional_plane'] = [reference_plane]
                 session_with_all_planes['additional_functional_planes'] = [p for p in all_planes if p != reference_plane]
             rf.create_rotated_masks_for_standard_mode(full_manifest, session_with_all_planes)
 
