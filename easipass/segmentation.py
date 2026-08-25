@@ -1664,8 +1664,23 @@ def align_somaprint_hcr(full_manifest: dict, session: dict, only_hcr: bool = Fal
         n_mov = sph_stats.get('n_mov', len(matches))      # total moving cells the matcher saw
         n_unmatched = max(0, n_mov - len(matches))
         rate = len(matches) / n_mov if n_mov else 0.0
-        rprint(f"  [green]✓ {round_folder}:[/green] [b]{len(matches)}/{n_mov}[/b] cells matched "
-               f"([b]{rate*100:.0f}%[/b]) · {n_unmatched} unmatched")
+        # BOTH directions. The forward rate alone flatters: several moving cells can claim the
+        # same reference cell, so len(matches)/n_mov says nothing about how much of the reference
+        # round was actually reached. The reverse rate counts DISTINCT reference cells claimed,
+        # and a large forward/reverse gap is the diagnostic -- it means contention (many-to-one)
+        # or coverage the two rounds do not share.
+        n_ref = sph_stats.get('n_ref', 0)
+        n_ref_hit = len({int(v[0]) for v in matches.values() if v[0] is not None})
+        _mov, _ref = f"HCR{HCR_round}", f"HCR{ref}"
+        rev = (f" · [b]{100*n_ref_hit/n_ref:.0f}%[/b] of {_ref} found in {_mov} "
+               f"([b]{n_ref_hit}[/b]/{n_ref})") if n_ref else ""
+        rprint(f"  [green]✓ {round_folder}:[/green] [b]{rate*100:.0f}%[/b] of {_mov} found in "
+               f"{_ref} ([b]{len(matches)}[/b]/{n_mov}){rev}")
+        if n_ref and n_ref_hit < len(matches):
+            rprint(f"      [dim]{n_unmatched} {_mov} cells unmatched · "
+                   f"{len(matches) - n_ref_hit} share an {_ref} partner with another cell[/dim]")
+        else:
+            rprint(f"      [dim]{n_unmatched} {_mov} cells unmatched[/dim]")
         rprint(f"      vs IoU: [b]{n_added}[/b] added on top · [b]{n_over}[/b] re-assigned · "
                f"{n_conf} confirmed · {n_iou_only} left to IoU")
         rprint(f"      [dim]stages: {len(matches) - n_repair} overlap anchor + "
@@ -2173,8 +2188,12 @@ def print_match_summary(full_manifest: dict, all_planes: list):
         n_soma = int(soma_matched.sum()) if soma_matched is not None else 0
         n_iou = int(df['twoP_mask'].notna().sum()) if 'twoP_mask' in df.columns else 0
 
-        line = (f"  Plane {plane}: {n_soma}/{denom} 2P masks matched HCR{ref} "
-                f"(somaprint; IoU: {n_iou})")
+        # Name both matchers and both rates. Reporting one count against the total
+        # invited it to be read as "the" match rate, when the two matchers are
+        # independent and disagree by a few percent by design.
+        line = (f"  Plane {plane} of {denom} 2P cells -> HCR{ref}:  "
+                f"IoU {n_iou} ({100 * n_iou / denom:.0f}%)  ·  "
+                f"soma-print {n_soma} ({100 * n_soma / denom:.0f}%)")
         if soma_matched is not None:
             for r in register_rounds:
                 col = f'round_{r}_mask'
