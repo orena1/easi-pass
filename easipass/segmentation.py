@@ -29,11 +29,11 @@ from scipy.interpolate import LinearNDInterpolator
 try:
     from .registrations import verify_rounds  # Relative import (running as part of a package)
     from .functional import get_number_of_suite2p_planes
-    from .meta import get_intensity_extraction_config, get_round_folder_name, output_root, rprint
+    from .meta import get_intensity_extraction_config, get_round_folder_name, output_root, rprint, pause
 except ImportError:
     from registrations import verify_rounds  # Absolute import (running in Jupyter notebook)
     from functional import get_number_of_suite2p_planes
-    from meta import get_intensity_extraction_config, get_round_folder_name, output_root, rprint
+    from meta import get_intensity_extraction_config, get_round_folder_name, output_root, rprint, pause
 
 
 
@@ -417,7 +417,7 @@ def verify_2p_cellpose_segmentations(seg_files: list):
     for plane, path in seg_files:
         rprint(f"  plane {plane}: [yellow]{path}[/yellow]")
     rprint("\nOpen any plane that needs editing in the Cellpose GUI, then press [green]Enter[/green] to continue...")
-    input()
+    pause()
 
 def compute_M(data):
     cols = np.arange(data.size)
@@ -1574,8 +1574,15 @@ def align_somaprint_hcr(full_manifest: dict, session: dict, only_hcr: bool = Fal
 
         mov_masks_path = cellpose_aligned / f"{round_folder}_masks.tiff"
         sph_stats = {}
+        # The ONE IoU layer: hand soma-print the pre-pass's own 1:1 picks so it does not
+        # recompute a second, differently-defined overlap of its own. iou_at_mask1_z is the
+        # column that decided is_best_match, and for HCR<->HCR it is ~= the full 3D IoU.
+        _bm = df.loc[df['is_best_match'] == True].drop_duplicates('mask1')
+        iou_picks = {int(r.mask1): (int(r.mask2), float(r.iou_at_mask1_z))
+                     for r in _bm.itertuples() if pd.notna(r.mask2)}
         matches = sph_lib.run_for_round(mov_masks_path, ref_masks_path, res_xyz,
-                                        params, round_label=round_folder, stats=sph_stats)
+                                        params, round_label=round_folder, stats=sph_stats,
+                                        iou_picks=iou_picks)
         if not matches:
             continue
 
@@ -1620,16 +1627,49 @@ def align_somaprint_hcr(full_manifest: dict, session: dict, only_hcr: bool = Fal
 
         df = df.sort_values(['mask1', 'iou_at_mask1_z'],
                             ascending=[True, False]).reset_index(drop=True)
+
+        # How each soma-print pick relates to the IoU matcher's OWN pick for the same cell.
+        # This is a different axis from somaprint_source, which records which STAGE produced the
+        # pick -- and the two are nearly orthogonal. A stage-1 overlap anchor can be a cell IoU
+        # never matched, while most stage-2 "repairs" are cells IoU had already matched
+        # identically: they only fell through to stage 2 because they missed the stricter
+        # overlap_tau seed gate, not because overlap couldn't find them. Reporting the stage
+        # therefore said nothing about what the hybrid contributes, so record the comparison
+        # the name promises: 'added' (IoU had no match), 'override' (different partner),
+        # 'confirms' (same partner). NA where soma-print made no pick.
+        iou_pick = (df.loc[df['is_best_match'] == True]
+                      .drop_duplicates('mask1').set_index('mask1')['mask2'])
+        sp_pick = (df.dropna(subset=['somaprint_hcr_label'])
+                     .drop_duplicates('mask1').set_index('mask1')['somaprint_hcr_label'])
+
+        def _vs_iou(m1):
+            s = sp_pick.get(m1)
+            if s is None or pd.isna(s):
+                return pd.NA
+            i = iou_pick.get(m1)
+            if i is None or pd.isna(i):
+                return 'added'
+            return 'confirms' if int(s) == int(i) else 'override'
+
+        df['somaprint_vs_iou'] = df['mask1'].map(_vs_iou).astype('string')
         df.to_csv(csv_path, index=False)
 
+        vs = df.drop_duplicates('mask1')['somaprint_vs_iou']
+        n_added = int((vs == 'added').sum())
+        n_over = int((vs == 'override').sum())
+        n_conf = int((vs == 'confirms').sum())
+        n_iou_only = int(iou_pick.index.difference(sp_pick.index).size)
+
         n_repair = sum(1 for v in matches.values() if v[4] == 'somaprint')
-        extra = f", +{len(orphan_m1s)} non-IoU recoveries" if orphan_m1s else ""
         n_mov = sph_stats.get('n_mov', len(matches))      # total moving cells the matcher saw
         n_unmatched = max(0, n_mov - len(matches))
         rate = len(matches) / n_mov if n_mov else 0.0
         rprint(f"  [green]✓ {round_folder}:[/green] [b]{len(matches)}/{n_mov}[/b] cells matched "
-               f"([b]{rate*100:.0f}%[/b]) · {n_unmatched} unmatched · "
-               f"{len(matches) - n_repair} overlap + {n_repair} soma-repair{extra}")
+               f"([b]{rate*100:.0f}%[/b]) · {n_unmatched} unmatched")
+        rprint(f"      vs IoU: [b]{n_added}[/b] added on top · [b]{n_over}[/b] re-assigned · "
+               f"{n_conf} confirmed · {n_iou_only} left to IoU")
+        rprint(f"      [dim]stages: {len(matches) - n_repair} overlap anchor + "
+               f"{n_repair} soma-repair (stage, not contribution)[/dim]")
 
 
 def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):

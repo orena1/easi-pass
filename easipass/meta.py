@@ -68,6 +68,18 @@ def flush_input():
             pass                            # can't flush here; the prompt still works
 
 
+def pause(prompt=""):
+    """input() that first discards type-ahead. Use this for EVERY blocking pipeline prompt.
+
+    A bare input() reads whatever is already sitting in the tty buffer, so Enters tapped during
+    a long silent stage get consumed by the NEXT prompt. Depending on the prompt that either
+    blows straight through a checkpoint the user never saw, or -- at a validating prompt --
+    spams its retry message once per queued newline before the user can answer.
+    """
+    flush_input()
+    return input(prompt)
+
+
 def parse_json(json_file):
     """
     Parse a json/hjson manifest. Normalizes base_path slashes so the same
@@ -128,6 +140,7 @@ def user_input_missing(check_results, message, color):
         rprint("  [green]y[/green]           = continue anyway, without these files")
         rprint("  [red]n[/red]           = stop now")
         rprint("  [yellow]check-again[/yellow] = re-check these paths (add the files first, then choose this)")
+        flush_input()
         out = Prompt.ask("Your choice", choices=["y", "n", "check-again"])
         if out == 'n':
             sys.exit()

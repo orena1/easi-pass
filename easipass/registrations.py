@@ -9,11 +9,11 @@ from pathlib import Path
 
 try:
     from .meta import (parse_json, get_hcr_to_hcr_registration_config, get_rotation_config, rprint, track,
-                       get_round_folder_name, flush_input)  # Relative import (for running as part of a package)
+                       get_round_folder_name, flush_input, pause)  # Relative import (for running as part of a package)
     from . import automation as auto
 except ImportError:
     from meta import (parse_json, get_hcr_to_hcr_registration_config, get_rotation_config, rprint, track,
-                      get_round_folder_name, flush_input)  # Absolute import (for running in Jupyter Notebook)
+                      get_round_folder_name, flush_input, pause)  # Absolute import (for running in Jupyter Notebook)
     import automation as auto
 
 try:
@@ -191,7 +191,7 @@ def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
             rprint(f"  [yellow]{f}[/yellow]")
         rprint(f"\nExpected directory: [dim]{reference_round.parent}[/dim]")
         rprint("\nAdd the missing files, then press [green]Enter[/green] to continue...")
-        input()
+        pause()
     if only_paths:
         return reference_round, mov_rounds
     # register the rounds
@@ -470,7 +470,7 @@ def _register_rounds_legacy(full_manifest):
     rprint(f"   • Add 'HCR_selected_registrations' to: [yellow]{full_manifest['manifest_path']}[/yellow]")
     rprint("   • This will specify which rounds you want to register")
     rprint("\n[bold]Press [green]Enter[/green] when configuration is complete...[/bold]")
-    input()
+    pause()
 
     _, _, ready_to_apply = verify_rounds(full_manifest, parse_registered=True)
     rprint("[green]✅ Configuration loaded successfully[/green]\n")
@@ -479,7 +479,7 @@ def _register_rounds_legacy(full_manifest):
     if ready_to_apply:
         rprint(f"    Rounds ready for registration: [green]{', '.join(ready_to_apply)}[/green]")
         rprint("\n[bold]Press [green]Enter[/green] to apply registration matrix...[/bold]")
-        input()
+        pause()
         registration_apply(full_manifest)
         rprint("\n[green]✅ Registration applied successfully[/green]")
     else:
@@ -545,8 +545,9 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
         rprint("  Open the overlay images above. Press [green]Enter[/green] to accept the "
                "suggested registration.")
         rprint(f"  Otherwise, enter a row # ({rows}) to override:")
-        flush_input()  # drop Enters typed during the silent deform above, or this won't stop
-        chosen_cand = _resolve_candidate(input().strip(), cands)
+        # pause(), not input(): drops Enters typed during the silent deform above, which would
+        # otherwise be read as "accept the suggestion" without the prompt ever stopping.
+        chosen_cand = _resolve_candidate(pause().strip(), cands)
         chosen[str(rnd)] = chosen_cand['tag']
         rprint(f"  [green]selected[/green] HCR{rnd}: {chosen_cand['tag']}")
 
@@ -575,11 +576,12 @@ def _confirm_round_overwrite(rnd, ref, done):
     rprint(f"  [dim]{done['dir']}[/dim]")
     rprint("    y = re-run and overwrite above outputs")
     rprint("    n = skip, keep above outputs")
-    flush_input()   # a stray Enter here must not silently trigger a 15-minute recompute
     # Neither answer is a default, so keep asking until one is given -- same loop as
     # registrations_utils.check_overwrite, which asks this question for the 2P planes.
+    # pause() flushes each time round, so a stray Enter can neither trigger a 15-minute
+    # recompute nor spam the retry message once per queued newline.
     while True:
-        resp = input("  input [y/n]: ").strip().lower()
+        resp = pause("  input [y/n]: ").strip().lower()
         if resp in ('y', 'n'):
             return resp == 'y'
         rprint("    [yellow]Please enter y or n[/yellow]")
@@ -598,8 +600,9 @@ def _choose_global_interactive(rnd, ref, gtable, sug):
     rprint("      Open the overlay images above. Press [green]Enter[/green] to accept the "
            "suggested registration.")
     rprint(f"      Otherwise, enter a row # ({rows}) to override:")
-    flush_input()      # drop Enters typed during the silent deform above, or this won't stop
-    return _resolve_global(input().strip(), gtable, sug)
+    # pause(), not input(): drops Enters typed during the silent stage above, which would
+    # otherwise be read as "accept the suggestion" without the prompt ever stopping.
+    return _resolve_global(pause().strip(), gtable, sug)
 
 
 def _resolve_global(sel, gtable, sug):
@@ -2005,7 +2008,7 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
         rprint(f"  Directory: [yellow]{qa_folder}[/yellow]")
         rprint(f"  [dim]Ch1=HCR (magenta), Ch2=2P (green)[/dim]")
         rprint("\nPress [green]Enter[/green] to continue with mask matching...")
-        input()
+        pause()
 
 
 

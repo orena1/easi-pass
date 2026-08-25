@@ -184,8 +184,10 @@ Both matchers are reported for every cell rather than reconciled for you, so you
 your own thresholds. Alongside it, `OUTPUT/MERGED/aligned_extracted_features/full_table_*.pkl`
 joins these matches to the per-gene intensities across all FISH rounds.
 
-In the demo, 1,199 of the 1,387 functional cells in the plane are matched — **86%** — with
-a median overlap of 0.29 in the functional plane, and soma-print confidently calls 83%. A
+In the demo, 1,199 of the 1,439 functional cells segmented in the plane are matched — **83%**
+— with a median overlap of 0.30 in the functional plane, and soma-print confidently calls
+1,157. The run itself reports this as 91% of the 1,316 cells that overlap any FISH cell at
+all; the difference is cells lying outside the recovered tissue, which nothing can match. A
 tracked copy of the table is in [`demo/completed/`](demo/completed/README.md) to diff your
 run against.
 

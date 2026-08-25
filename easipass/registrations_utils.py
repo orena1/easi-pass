@@ -16,6 +16,11 @@ from scipy.optimize import minimize
 import scipy.io as sio
 from pathlib import Path
 
+try:
+    from .meta import pause          # Relative import (running as part of a package)
+except ImportError:
+    from meta import pause           # Absolute import (running in Jupyter notebook)
+
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -59,7 +64,10 @@ def prompt_overwrite_per_plane(plane_idx: int, output_path: Path, overwrite_stat
     # overwrite_state caches this answer, so it silently governs every later plane too.
     print("  You are asked once: this answer is reused for every remaining plane.")
     while True:
-        response = input("Overwrite? [y/n]: ").strip().lower()
+        # pause(), not input(): Enters tapped during the long silent stage above would
+        # otherwise be eaten one per loop, spamming "Please enter y or n" before the user
+        # can answer.
+        response = pause("Overwrite? [y/n]: ").strip().lower()
         if response == 'y':
             overwrite_state[0] = True
             return True

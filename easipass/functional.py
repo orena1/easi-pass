@@ -4,10 +4,10 @@ import numpy as np
 from skimage.transform import rotate
 try:
     from .registrations import verify_rounds  # Relative import (running as part of a package)
-    from .meta import check_rotation, get_rotation_config, parse_json, output_root, rprint, track
+    from .meta import check_rotation, get_rotation_config, parse_json, output_root, rprint, track, pause
 except ImportError:
     from registrations import verify_rounds  # Absolute import (running in Jupyter notebook)
-    from meta import check_rotation, get_rotation_config, parse_json, output_root, rprint, track
+    from meta import check_rotation, get_rotation_config, parse_json, output_root, rprint, track, pause
 from tifffile import imread as tif_imread
 from tifffile import imwrite as tif_imwrite
 from sbxreader import sbx_get_metadata, sbx_memmap
@@ -194,7 +194,7 @@ def _rotate_plane(full_manifest, save_filename_C, save_path_registered, function
         print('')
         print('  Rotation is handled during landmarking - you do not need to set it here.')
         print('=' * 70)
-        input('  Press Enter when done > ')
+        pause('  Press Enter when done > ')
 
     # Always re-read manifest from disk before applying rotation so that any
     # edits the user made during an earlier prompt (e.g. during hires stitching

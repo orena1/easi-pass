@@ -10,11 +10,11 @@ from tifffile import imread as tif_imread
 from tifffile import imwrite as tif_imwrite
 try:
     from .registrations import verify_rounds  # Relative import (running as part of a package)
-    from .meta import check_rotation, get_automation_config, get_rotation_config, get_stitching_config, parse_json, output_root, rprint
+    from .meta import check_rotation, get_automation_config, get_rotation_config, get_stitching_config, parse_json, output_root, rprint, pause
     from .auto_stitching import auto_stitch_tiles, StitchingError
 except ImportError:
     from registrations import verify_rounds  # Absolute import (running in Jupyter notebook)
-    from meta import check_rotation, get_automation_config, get_rotation_config, get_stitching_config, parse_json, output_root, rprint
+    from meta import check_rotation, get_automation_config, get_rotation_config, get_stitching_config, parse_json, output_root, rprint, pause
     from auto_stitching import auto_stitch_tiles, StitchingError
 from skimage.transform import rotate
 
@@ -417,7 +417,7 @@ def stitch_tiles_and_rotate(full_manifest: dict, session: dict):
             Once you've created the stitched file, press Enter to continue...
             '''
             rprint(output_string)
-            input()
+            pause()
         rprint(f"[green]✓ Found stitched file: {stitched_file}[/green]")
 
     # First-run detection: prompt only if NO rotated files exist yet for any plane.
@@ -445,7 +445,7 @@ def stitch_tiles_and_rotate(full_manifest: dict, session: dict):
         print('')
         print('  Rotation is handled during landmarking - you do not need to set it here.')
         print('=' * 70)
-        input('  Press Enter when done > ')
+        pause('  Press Enter when done > ')
 
     # Always re-read manifest from disk before applying rotation so subsequent
     # planes pick up edits the user made during plane 0's prompt.
