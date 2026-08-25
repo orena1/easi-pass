@@ -31,6 +31,7 @@ try:
         fit_affine_ransac, run_local_tile_ransac,
         compute_tile_defaults, compute_adaptive_matching_params,
         resolve_hcr_resolution,
+        _detail,
     )
 except ImportError:
     from registrations_utils import (
@@ -45,6 +46,7 @@ except ImportError:
         fit_affine_ransac, run_local_tile_ransac,
         compute_tile_defaults, compute_adaptive_matching_params,
         resolve_hcr_resolution,
+        _detail,
     )
 import pandas as pd
 
@@ -1444,7 +1446,8 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             rprint(f"  [yellow]Coarse patch reduced to {2 * _prc}px (crop={min_dim}px)[/yellow]")
 
         # ---- AFFINE PASS 1: Coarse matching + RANSAC ----
-        rprint(f"  [dim]Affine Pass 1: {2 * _prc}px patches, +/-{SEARCH_XY_COARSE}px search[/dim]")
+        rprint("  [dim]Affine pass[/dim]")
+        _detail(f"    patches {2 * _prc}px, search +/-{SEARCH_XY_COARSE}px")
         cell_results_coarse = find_cell_displacements(
             twop_crop_binary, twop_crop_labels, hcr_crop_3d, z_map_crop, centroids_crop,
             patch_radius=_prc, search_xy=SEARCH_XY_COARSE,
@@ -1570,8 +1573,9 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
                                 f'crop_origin_yx=({oy},{ox})'),
             }
             tif_imwrite(str(stage_path), stack, imagej=True, metadata=meta)
-            rprint(f"  [dim]stage '{stage_name}' → {stage_path.name} "
-                   f"(IoU {snap['iou']:.3f})[/dim]")
+            # The IoU is already reported by the per-stage line above; this is
+            # just where the QA tiff landed.
+            _detail(f"  stage '{stage_name}' -> {stage_path.name} (IoU {snap['iou']:.3f})")
 
         # ---- CASCADE SNAPSHOTS (for cp4-eval and future regression checks) ----
         # Captures the alignment state at each named stage so a comparison
@@ -1616,7 +1620,8 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
                 tile_ratio=XY_TILE_RATIO, z_tile_ratio=Z_TILE_RATIO,
                 search_z_min=SEARCH_Z_MIN, search_z_max=SEARCH_Z_MAX)
 
-            rprint(f"  [dim]Tiles {tile_size}px: {2 * patch_r}px patches, +/-{search_xy}px search, z+/-{search_z}[/dim]")
+            rprint(f"  [dim]Tiles {tile_size}px[/dim]")
+            _detail(f"    patches {2 * patch_r}px, search +/-{search_xy}px, z +/-{search_z}")
             centroids_cur = extract_centroids(cascade_state['twop_labels'])
             if len(centroids_cur) == 0:
                 continue
@@ -1752,7 +1757,7 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
                     'full_hcr_shape': (int(y1), int(x1)),
                 },
             }, _f)
-        rprint(f"  [dim]Cascade snapshots → {snapshots_path.name}[/dim]")
+        _detail(f"  Cascade snapshots -> {snapshots_path.name}")
 
         # ---- UNCROP: Compose displacement fields back to full HCR space ----
         # Total displacement in inner-crop space

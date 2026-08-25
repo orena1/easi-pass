@@ -14,6 +14,19 @@ from skimage.measure import regionprops
 from skimage.segmentation import find_boundaries
 from scipy.optimize import minimize
 import scipy.io as sio
+import os as _os
+
+
+# Cascade detail lines are off by default. The per-stage IoU tells you whether the
+# alignment worked; the patch geometry, tile-acceptance counts and edge tallies only
+# matter when working out why a bad one went wrong. Set EASIPASS_VERBOSE=1 for those.
+_CASCADE_VERBOSE = _os.environ.get('EASIPASS_VERBOSE', '') not in ('', '0', 'false', 'False')
+
+
+def _detail(msg):
+    """print() for cascade internals; silent unless EASIPASS_VERBOSE is set."""
+    if _CASCADE_VERBOSE:
+        print(msg)
 from pathlib import Path
 
 try:
@@ -1972,7 +1985,7 @@ def find_cell_displacements(twop_binary, twop_labels, hcr_3d_bin, z_map, centroi
     hcr_slices = {}
     for dz in range(-search_z, search_z + 1):
         hcr_slices[dz] = sample_hcr_binary_at_zmap(hcr_3d_bin, z_map, z_offset=dz)
-    print(f"  Pre-sampled {len(hcr_slices)} HCR Z-slices in {time.time() - t0:.1f}s")
+    _detail(f"  Pre-sampled {len(hcr_slices)} HCR Z-slices in {time.time() - t0:.1f}s")
 
     # FIX 1: dilate the FOV mask so the matcher always has real HCR to score
     # against, even at maximum shift. Without this, an edge cell shifted by
@@ -2000,9 +2013,9 @@ def find_cell_displacements(twop_binary, twop_labels, hcr_3d_bin, z_map, centroi
         edge_margin = 0
         twop_interior = fov_filled
 
-    print(f"  Patch: {full_size}x{full_size}, search: +/-{cell_search_xy}px, "
+    _detail(f"  Patch: {full_size}x{full_size}, search: +/-{cell_search_xy}px, "
           f"fov_dilation={fov_dilation_eff}, edge_margin={edge_margin}")
-    print(f"  Patch:search ratio: {full_size / max(1, 2 * cell_search_xy):.1f}:1")
+    _detail(f"  Patch:search ratio: {full_size / max(1, 2 * cell_search_xy):.1f}:1")
 
     # Pre-compute FFT shape (same for all cells with same patch size)
     fft_h = 1 << int(np.ceil(np.log2(full_size)))
@@ -2097,9 +2110,9 @@ def find_cell_displacements(twop_binary, twop_labels, hcr_3d_bin, z_map, centroi
         if best_peak_ratio < min_peak_ratio:
             n_ambiguous += 1
 
-    print(f"  Edge cells (shifted extraction): {n_shifted}")
-    print(f"  Edge-skipped cells (within {edge_margin}px of FOV boundary): {n_edge_skipped}")
-    print(f"  Ambiguous matches (peak_ratio < {min_peak_ratio}): {n_ambiguous}")
+    _detail(f"  Edge cells (shifted extraction): {n_shifted}")
+    _detail(f"  Edge-skipped cells (within {edge_margin}px of FOV boundary): {n_edge_skipped}")
+    _detail(f"  Ambiguous matches (peak_ratio < {min_peak_ratio}): {n_ambiguous}")
     return results
 
 
@@ -2259,7 +2272,7 @@ def run_local_tile_ransac(twop_binary, hcr_3d_bin, z_map, centroids, cell_df,
     ny, nx = twop_binary.shape
     step = int(tile_size * (1 - overlap))
     good = cell_df[(cell_df.iou_best >= min_iou) & (cell_df.iou_gain >= min_gain)]
-    print(f"  Cells passing local threshold: {len(good)} / {len(cell_df)}")
+    _detail(f"  Cells passing local threshold: {len(good)} / {len(cell_df)}")
 
     tile_results = []
     n_iou_rejected = 0
@@ -2420,7 +2433,7 @@ def _synthesize_warp_from_tiles(
                 n_outlier_rejected += 1
         accepted = [t for t in tile_results if t['accepted']]
     if verbose:
-        print(f"  Accepted tiles: {len(accepted)} / {len(tile_results)} "
+        _detail(f"  Accepted tiles: {len(accepted)} / {len(tile_results)} "
               f"(IoU-rejected: {n_iou_rejected}, spatial-outlier: {n_outlier_rejected})")
     if len(accepted) < 3:
         return np.zeros((ny, nx)), np.zeros((ny, nx)), np.zeros((ny, nx)), tile_results
@@ -2455,7 +2468,7 @@ def _synthesize_warp_from_tiles(
         dz_vals = np.concatenate([dz_vals, nn_dz_i(border_pts) * w])
         centers = np.vstack([centers, border_pts])
         if verbose:
-            print(f"  Border anchors: {n_border} points (spacing={s}px, "
+            _detail(f"  Border anchors: {n_border} points (spacing={s}px, "
                   f"decay={decay_radius:.0f}px, floor={border_weight_floor})")
 
     yy, xx = np.mgrid[:ny, :nx]
