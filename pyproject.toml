@@ -89,11 +89,10 @@ dependencies = [
     "scikit-learn>=1.5",
 ]
 
-# TODO before publishing: replace with the repository's final public URL.
 [project.urls]
-Homepage = "https://github.com/orena1/ezfish_pipeline"
-Repository = "https://github.com/orena1/ezfish_pipeline"
-Issues = "https://github.com/orena1/ezfish_pipeline/issues"
+Homepage = "https://github.com/orena1/easi-pass"
+Repository = "https://github.com/orena1/easi-pass"
+Issues = "https://github.com/orena1/easi-pass/issues"
 
 [project.optional-dependencies]
 

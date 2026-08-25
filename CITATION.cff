@@ -21,8 +21,7 @@ authors:
     given-names: Oren
     email: oren.a4@gmail.com
 
-# TODO before publishing: replace with the repository's final public URL.
-repository-code: "https://github.com/orena1/ezfish_pipeline"
+repository-code: "https://github.com/orena1/easi-pass"
 
 keywords:
   - two-photon imaging
