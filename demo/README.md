@@ -16,7 +16,7 @@ demo/
 ├── JS078_demo.hjson       ← the manifest; nothing to edit
 ├── make_demo_data.py      ← how the demo subset was assembled from full JS078 (reproducible)
 ├── fetch_demo_data.py     ← downloads the imaging data from the GitHub release
-├── demo_pre_run/          ← FRESH: the data you run the pipeline on (~350 MB download)
+├── demo_pre_run/          ← FRESH: the data you run the pipeline on (191 MB download)
 │   └── JS078_demo/
 │       ├── 2P/plane_0.tiff              (2P low-res mean image, ~1.6 MB)
 │       ├── 2P/plane_0_hires.tiff        (2P hi-res stitched image, ~49 MB)
@@ -51,6 +51,14 @@ Both commands run from the repository root. There is nothing to edit: the manife
    ```bash
    python demo/fetch_demo_data.py
    ```
+   Downloads 191 MB from this repo's
+   [releases page](https://github.com/orena1/easi-pass/releases), checks its sha256, and
+   unpacks it into `demo/demo_pre_run/`. Budget about **1.3 GB free**: 790 MB of input
+   images, and roughly 450 MB the run itself writes under `OUTPUT/`.
+
+   If the download fails, the archive `JS078_demo_pre_run.zip` can be fetched by hand from
+   that releases page and unzipped into `demo/`. Re-running the script is safe: it skips the
+   download when the data is already there, and `--force` re-fetches.
 
 2. **Run the pipeline:**
    ```bash

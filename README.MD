@@ -52,8 +52,10 @@ python demo/fetch_demo_data.py
 python master_pipeline.py --manifest demo/JS078_demo.hjson
 ```
 
-Nothing to edit. The run pauses three times to let you check intermediate output;
-`demo/README.md` gives the answers.
+The first command pulls 191 MB from this repo's
+[releases page](https://github.com/orena1/easi-pass/releases) and checks its sha256; allow
+about 1.3 GB of disk for the images and what the run writes. Nothing to edit. The run pauses
+three times to let you check intermediate output, and `demo/README.md` gives the answers.
 
 ## Running your own data
 
