@@ -2103,9 +2103,9 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         # produced it, and every metric belongs to a named pair.
         #
         # 2P↔HCR:
-        #   twoP_mask, twoP_iou                 the IoU best-match and that pair's overlap
-        #   twoP_somaprint_mask                 soma-print's pick, independent of IoU
-        #   twoP_somaprint_confident            whether that pick cleared its gate
+        #   twoP_iou_match, twoP_iou      the IoU best-match and that pair's overlap
+        #   twoP_somaprint_match          soma-print's pick, independent of IoU
+        #   twoP_somaprint_confident      whether that pick cleared its gate
         # HCR round-to-round, one set per non-reference round R:
         #   round_{R}_iou_match, round_{R}_iou
         #   round_{R}_hybrid_match, round_{R}_matched_by
@@ -2128,16 +2128,16 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         ref_mask_ids = reference_round_intensities_pivot.mask_id_main
 
         # 2P columns. Two matchers, two answers, never blended -- the same shape as the round
-        # block below. twoP_mask and twoP_somaprint_mask are both 2P cell ids and can disagree;
+        # block below. twoP_iou_match and twoP_somaprint_match are both 2P cell ids and can disagree;
         # downstream consumers pick which matcher to filter on.
         #
         # Sizes, containments and the neighbourhood term are NOT repeated here. Every one of
         # them, and the soma scores behind twoP_somaprint_confident, is already a column of
         # MERGED/aligned_masks/twop_plane{N}_to_HCR{ref}.csv, which is the full per-pair record.
-        reference_round_intensities_pivot['twoP_mask'] = _lookup_column(ref_mask_ids, twoP_mapping_dict)
+        reference_round_intensities_pivot['twoP_iou_match'] = _lookup_column(ref_mask_ids, twoP_mapping_dict)
         reference_round_intensities_pivot['twoP_iou'] = _lookup_column(
             ref_mask_ids, twoP_metrics_dict.get('iou_at_mask1_z', {}))
-        reference_round_intensities_pivot['twoP_somaprint_mask'] = _lookup_column(
+        reference_round_intensities_pivot['twoP_somaprint_match'] = _lookup_column(
             ref_mask_ids, twoP_soma_mapping_dict)
         # A cell soma-print never picked is not confident, so this is False, not missing --
         # matching how somaprint_confident is stored on the matching CSVs. Left as None it
@@ -2250,19 +2250,19 @@ def print_match_summary(full_manifest: dict, all_planes: list):
             denom = "?"
 
         df = pd.read_pickle(merged_files[0])
-        # twoP_somaprint_mask is populated for confident AND non-confident
+        # twoP_somaprint_match is populated for confident AND non-confident
         # picks (so non-confident scores are still visible in the table);
         # the summary count is the confident subset, matching the historical
         # meaning of this line.
-        if 'twoP_somaprint_mask' in df.columns:
+        if 'twoP_somaprint_match' in df.columns:
             if 'twoP_somaprint_confident' in df.columns:
-                soma_matched = df['twoP_somaprint_mask'].notna() & df['twoP_somaprint_confident'].fillna(False).astype(bool)
+                soma_matched = df['twoP_somaprint_match'].notna() & df['twoP_somaprint_confident'].fillna(False).astype(bool)
             else:
-                soma_matched = df['twoP_somaprint_mask'].notna()
+                soma_matched = df['twoP_somaprint_match'].notna()
         else:
             soma_matched = None
         n_soma = int(soma_matched.sum()) if soma_matched is not None else 0
-        n_iou = int(df['twoP_mask'].notna().sum()) if 'twoP_mask' in df.columns else 0
+        n_iou = int(df['twoP_iou_match'].notna().sum()) if 'twoP_iou_match' in df.columns else 0
 
         # Name both matchers and both rates. Reporting one count against the total
         # invited it to be read as "the" match rate, when the two matchers are

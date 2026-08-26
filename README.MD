@@ -193,10 +193,10 @@ plane                        0
 mean_round_01_DAPI         6.8     its genes in the reference round,
 mean_round_01_SST          0.0     one column per channel
 
-twoP_mask                  412     which functional cell it is, by mask overlap
+twoP_iou_match             412     which functional cell it is, by mask overlap
 twoP_iou                  0.51     how good that overlap was
 
-twoP_somaprint_mask        412     and by Soma-print, which can pick a different cell
+twoP_somaprint_match       412     and by Soma-print, which can pick a different cell
 twoP_somaprint_confident  True     whether that pick cleared its gate
 
 round_02_iou_match         310     which cell it is in round 02, by overlap alone
@@ -221,13 +221,13 @@ matchers that can disagree:
 
 | Column | Meaning |
 |---|---|
-| `twoP_mask` | The cell matched by mask overlap, blank if none |
+| `twoP_iou_match` | The cell matched by mask overlap, blank if none |
 | `twoP_iou` | Overlap of that pair, in the functional plane |
-| `twoP_somaprint_mask` | The cell Soma-print picked, confident or not |
+| `twoP_somaprint_match` | The cell Soma-print picked, confident or not |
 | `twoP_somaprint_confident` | Whether that pick cleared its gate. `False`, never blank |
 
 A Soma-print pick is not always a confident one: in the demo, 1,387 cells get a pick and 1,149
-of those are confident. So `twoP_somaprint_mask.notna()` and `twoP_somaprint_confident` are
+of those are confident. So `twoP_somaprint_match.notna()` and `twoP_somaprint_confident` are
 different questions.
 
 Cell in each further FISH round `R`, one set per round. Absent for single-round runs:
