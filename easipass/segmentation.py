@@ -2194,8 +2194,12 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_second_score', {}))
         reference_round_intensities_pivot['twoP_somaprint_mask_size'] = _lookup_column(
             ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_mask_size', {}))
-        reference_round_intensities_pivot['twoP_somaprint_confident'] = _lookup_column(
-            ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_confident', {}))
+        # A cell soma-print never picked is not confident, so this is False, not missing --
+        # matching how somaprint_confident is stored on the matching CSVs. Left as None it
+        # came back from csv as NaN in an object column, where `~col` silently misbehaves.
+        reference_round_intensities_pivot['twoP_somaprint_confident'] = pd.Series(
+            _lookup_column(ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_confident', {})),
+            index=reference_round_intensities_pivot.index).fillna(False).astype(bool)
 
         # HCR round columns
         for j in range(len(HCR_round_mapping_dict)):
