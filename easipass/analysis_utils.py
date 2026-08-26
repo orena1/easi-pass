@@ -1041,8 +1041,12 @@ def filter_artifacts(
     Returns:
         Filtered DataFrame
     """
+    # Both resolved through get_col: on a two-level table `row['plane']` returns a Series,
+    # not a scalar, and the `plane not in plane_data` test below then raises on an
+    # unhashable Series.
     match_col = get_col(df, 'twoP_iou_match')
-    if 'plane' not in df.columns or match_col not in df.columns:
+    plane_col = get_col(df, 'plane')
+    if plane_col not in df.columns or match_col not in df.columns:
         rprint("[yellow]Warning: Required columns not found, skipping artifact filter[/yellow]")
         return df
 
@@ -1052,7 +1056,7 @@ def filter_artifacts(
     keep_mask = np.ones(len(df), dtype=bool)
 
     for idx, row in df.iterrows():
-        plane = row['plane']
+        plane = row[plane_col]
         twop_mask = row[match_col]
 
         if pd.isna(twop_mask) or plane not in plane_data:
