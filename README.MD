@@ -166,7 +166,7 @@ functional/FISH cell pair, and `is_best_match` marks the accepted 1:1 call.
 | `somaprint_best_score`, `somaprint_second_score` | Its best and runner-up scores |
 | `somaprint_confident` | Whether best separates significantly from runner-up |
 
-Both matchers are reported for every cell rather than reconciled, so you can set your own
+Both matchers are reported for every cell and never reconciled, so you set your own
 thresholds.
 
 ### The feature table
@@ -187,10 +187,8 @@ file per feature, single header row.
 | `round_{R}_somaprint_score`, `_second_score` | Scores behind a recovery, blank for a gate-clearing match |
 | `plane` | Which functional plane this file covers |
 
-Every round names its own round, reference included, so no round is a special case. The gene
-columns are joined on `round_{R}_hybrid_match`, so that column says whose intensities are on
-the row. `round_{R}_iou_match` is what overlap alone would have said, which is how you check
-the two against each other:
+The gene columns are joined on `round_{R}_hybrid_match`, so that column says whose intensities
+are on the row, and `round_{R}_iou_match` is what overlap alone would have said:
 
 ```python
 matched   = df.round_02_hybrid_match.notna()
@@ -198,9 +196,7 @@ by_iou    = df.round_02_iou_match.notna()
 recovered = df.round_02_matched_by == 'somaprint'
 ```
 
-Sizes, containments and intersections are not repeated here. They stay in
-`aligned_masks/{pair}.csv` above, and 3D cell sizes come straight from the published mask
-TIFFs with one `np.unique`.
+Sizes and containments are not repeated here; they stay in the matching table above.
 
 In the demo, 1,199 of the 1,439 segmented functional cells get a 1:1 overlap match (83%),
 with a median overlap of 0.29 in the functional plane. Soma-print confidently calls 1,149.
@@ -282,7 +278,8 @@ OUTPUT/
     └── aligned_extracted_features/   final tables, matches joined to genes
 ```
 
-The two worth opening are `MERGED/aligned_masks/` for the matches and
+Tables are written as both `.csv` and `.pkl`. Start with
+`MERGED/aligned_extracted_features/` for the result and
 `2P/registered/QualityCheck/` for the overlays that show whether alignment worked.
 
 ## Re-running

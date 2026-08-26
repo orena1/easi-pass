@@ -34,5 +34,5 @@ matched over cells that overlap anything, which is ~91%.
 
 If your `Final: IoU` is ~0.48 and the global shift is a small (~tens of px) accepted
 value, the 2P→HCR overlay is correct. A railed shift (e.g. `dy=+100`) that gets
-rejected means the low-res to hi-res placement was regenerated rather than kept. Re-run
+rejected means the low-res to hi-res placement was regenerated, not kept. Re-run
 and answer **n** to that overwrite prompt (see `../README.md`).
