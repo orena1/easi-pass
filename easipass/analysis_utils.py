@@ -592,12 +592,14 @@ def get_gene_column(df: pd.DataFrame, gene: str, round_num: str = '01',
         # Build list of alternatives in order of preference
         alternatives = []
 
-        # 1. Flattened MultiIndex format (from smart_merge_planes)
-        # e.g., 'mean_medflt_3x4x4_PDYN' or 'mean_medflt_3x4x4_round_02_TAC1'
+        # 1. The table merge_masks writes: the round is always named, reference included.
+        # e.g. 'mean_round_01_PDYN', 'mean_round_02_TAC1'
+        alternatives.append(f'{feature_type}_round_{round_num}_{gene}')
+
+        # 1b. Tables written before the reference round carried its number, and the
+        # flattened MultiIndex from smart_merge_planes, e.g. 'mean_medflt_3x4x4_PDYN'
         if round_num == '01':
             alternatives.append(f'{feature_type}_{gene}')
-        else:
-            alternatives.append(f'{feature_type}_round_{round_num}_{gene}')
 
         # 2. Simple gene name (round 01 only)
         alternatives.append(gene)

@@ -167,8 +167,40 @@ functional/FISH cell pair, and `is_best_match` marks the accepted 1:1 call.
 | `somaprint_confident` | Whether best separates significantly from runner-up |
 
 Both matchers are reported for every cell rather than reconciled, so you can set your own
-thresholds. Alongside it, `OUTPUT/MERGED/aligned_extracted_features/full_table_*.pkl` joins
-these matches to per-gene intensities across all rounds.
+thresholds.
+
+### The feature table
+
+`OUTPUT/MERGED/aligned_extracted_features/full_table_{feature}_twop_plane{N}.csv` (and `.pkl`)
+joins those matches to per-gene intensities. One row per FISH cell in the reference round, one
+file per feature, single header row.
+
+| Column | Meaning |
+|---|---|
+| `mask_id_main` | The FISH cell this row is about |
+| `{feature}_round_{R}_{gene}` | Intensity of that gene in that round, e.g. `mean_round_01_PDYN` |
+| `twoP_mask`, `twoP_iou` | Functional cell matched by overlap, and that overlap |
+| `twoP_somaprint_mask`, `twoP_somaprint_confident` | The geometric matcher's call, and its confidence |
+| `round_{R}_iou_match`, `round_{R}_iou` | Cell in round R by overlap alone, and that overlap |
+| `round_{R}_hybrid_match` | Cell in round R by the full matcher |
+| `round_{R}_matched_by` | `overlap` if it cleared the IoU and neighbourhood gates, `somaprint` if geometry recovered it |
+| `round_{R}_somaprint_score`, `_second_score` | Scores behind a recovery, blank for a gate-clearing match |
+| `plane` | Which functional plane this file covers |
+
+Every round names its own round, reference included, so no round is a special case. The gene
+columns are joined on `round_{R}_hybrid_match`, so that column says whose intensities are on
+the row. `round_{R}_iou_match` is what overlap alone would have said, which is how you check
+the two against each other:
+
+```python
+matched   = df.round_02_hybrid_match.notna()
+by_iou    = df.round_02_iou_match.notna()
+recovered = df.round_02_matched_by == 'somaprint'
+```
+
+Sizes, containments and intersections are not repeated here. They stay in
+`aligned_masks/{pair}.csv` above, and 3D cell sizes come straight from the published mask
+TIFFs with one `np.unique`.
 
 In the demo, 1,199 of the 1,439 segmented functional cells get a 1:1 overlap match (83%),
 with a median overlap of 0.29 in the functional plane. Soma-print confidently calls 1,149.

@@ -74,7 +74,7 @@ Both commands run from the repository root. There is nothing to edit: the manife
 The pipeline writes its results under `demo_pre_run/JS078_demo/OUTPUT/`. The key files:
 ```
 OUTPUT/MERGED/aligned_masks/twop_plane0_to_HCR01.csv          # per-cell 2P<->HCR matches
-OUTPUT/MERGED/aligned_extracted_features/full_table_*.pkl     # matches joined to the 5 HCR gene channels
+OUTPUT/MERGED/aligned_extracted_features/full_table_*.csv     # matches joined to the 5 HCR gene channels
 OUTPUT/2P/registered/QualityCheck/plane0_AFTER_registration_overlay.tiff   # visual check
 ```
 Compare `twop_plane0_to_HCR01.csv` against the golden copy in **`completed/`**
