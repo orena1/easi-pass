@@ -2099,40 +2099,27 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         ####       ####
         ###  MATCH  ###
         ####       ####
-        # Column naming in the merged table. All size / IoU / containment
-        # values are plane-restricted (at-plane for 2P↔HCR; ≈full-multiplane
-        # for HCR↔HCR). Subject of `containment` is named first
-        # (X_containment = fraction of X inside its partner). Unprefixed
-        # twoP_* = IoU side; twoP_somaprint_* = soma side.
+        # Column naming in the merged table. Every match column names the matcher that
+        # produced it, and every metric belongs to a named pair.
         #
-        # 2P↔HCR (IoU best-match):
-        #   twoP_mask, twoP_iou, twoP_containment, HCR_containment,
-        #   twoP_mask_size
-        # 2P↔HCR (somaprint, geometric matcher):
-        #   twoP_somaprint_mask, twoP_somaprint_best_score,
-        #   twoP_somaprint_second_score, twoP_somaprint_mask_size
+        # 2P↔HCR:
+        #   twoP_mask, twoP_iou                 the IoU best-match and that pair's overlap
+        #   twoP_somaprint_mask                 soma-print's pick, independent of IoU
+        #   twoP_somaprint_confident            whether that pick cleared its gate
         # HCR round-to-round, one set per non-reference round R:
-        #   round_{R}_iou_match, round_{R}_iou,
-        #   round_{R}_hybrid_match, round_{R}_matched_by,
+        #   round_{R}_iou_match, round_{R}_iou
+        #   round_{R}_hybrid_match, round_{R}_matched_by
         #   round_{R}_somaprint_score, round_{R}_somaprint_second_score
         #
-        # Sizes and containments are deliberately NOT repeated here -- every one of them is
-        # already in MERGED/aligned_masks/{pair}.csv (mask1_size, mask2_size, intersection,
-        # both containments), and 3D cell sizes fall out of the published mask tiffs with
-        # one np.unique. This table's job is gene values attached to reference cells.
+        # Sizes, containments, intersections and the neighbourhood term are deliberately NOT
+        # here. Every one of them is already a column of MERGED/aligned_masks/{pair}.csv, the
+        # full per-pair record, and 3D cell sizes fall out of the published mask tiffs with one
+        # np.unique. This table's job is gene values attached to reference cells, plus enough
+        # to say which cell each value came from.
         #
         # See match_masks() and align_somaprint() docstrings for the
         # precise definition of each metric. `mask_id_main` always refers
         # to mask2 in the matching CSVs (the reference round = stack2).
-        TWOP_COL_RENAME = {
-            'iou_at_mask1_z':         'twoP_iou',
-            'containment_2p':         'twoP_containment',
-            'containment_hcr_at_z':   'HCR_containment',
-            'mask1_size':             'twoP_mask_size',
-            # Reported neighborhood-agreement term (2P→HCR only; None on legacy
-            # CSVs → column of None, schema-stable). User thresholds on this.
-            'neighborhood_iou':       'twoP_neighborhood_iou',
-        }
 
         def _lookup_column(mask_ids, dct):
             """Map an iterable of mask_id_main values through a dict (None if missing)."""
@@ -2140,28 +2127,18 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
 
         ref_mask_ids = reference_round_intensities_pivot.mask_id_main
 
-        # 2P columns — IoU best-match path
+        # 2P columns. Two matchers, two answers, never blended -- the same shape as the round
+        # block below. twoP_mask and twoP_somaprint_mask are both 2P cell ids and can disagree;
+        # downstream consumers pick which matcher to filter on.
+        #
+        # Sizes, containments and the neighbourhood term are NOT repeated here. Every one of
+        # them, and the soma scores behind twoP_somaprint_confident, is already a column of
+        # MERGED/aligned_masks/twop_plane{N}_to_HCR{ref}.csv, which is the full per-pair record.
         reference_round_intensities_pivot['twoP_mask'] = _lookup_column(ref_mask_ids, twoP_mapping_dict)
-        for src_col, dest_col in TWOP_COL_RENAME.items():
-            reference_round_intensities_pivot[dest_col] = _lookup_column(
-                ref_mask_ids, twoP_metrics_dict.get(src_col, {}))
-
-        # 2P columns — somaprint side (geometric matcher, independent of
-        # IoU). For each HCR cell, twoP_somaprint_mask is the 2P cell that
-        # somaprint picked here, confident or not (None if no somaprint
-        # match landed on this HCR cell). twoP_somaprint_confident exposes
-        # the confidence flag so downstream code can filter; scores are
-        # populated whether or not the pick was confident. twoP_mask and
-        # twoP_somaprint_mask can disagree; downstream consumers pick
-        # which matcher to filter on.
+        reference_round_intensities_pivot['twoP_iou'] = _lookup_column(
+            ref_mask_ids, twoP_metrics_dict.get('iou_at_mask1_z', {}))
         reference_round_intensities_pivot['twoP_somaprint_mask'] = _lookup_column(
             ref_mask_ids, twoP_soma_mapping_dict)
-        reference_round_intensities_pivot['twoP_somaprint_best_score'] = _lookup_column(
-            ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_best_score', {}))
-        reference_round_intensities_pivot['twoP_somaprint_second_score'] = _lookup_column(
-            ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_second_score', {}))
-        reference_round_intensities_pivot['twoP_somaprint_mask_size'] = _lookup_column(
-            ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_mask_size', {}))
         # A cell soma-print never picked is not confident, so this is False, not missing --
         # matching how somaprint_confident is stored on the matching CSVs. Left as None it
         # came back from csv as NaN in an object column, where `~col` silently misbehaves.

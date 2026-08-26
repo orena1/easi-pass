@@ -194,10 +194,10 @@ mean_round_01_DAPI         6.8     its genes in the reference round,
 mean_round_01_SST          0.0     one column per channel
 
 twoP_mask                  412     which functional cell it is, by mask overlap
-twoP_iou                  0.51     ...plus containments, size, neighbourhood agreement
+twoP_iou                  0.51     how good that overlap was
 
 twoP_somaprint_mask        412     and by Soma-print, which can pick a different cell
-twoP_somaprint_confident  True     ...plus best and runner-up scores
+twoP_somaprint_confident  True     whether that pick cleared its gate
 
 round_02_iou_match         310     which cell it is in round 02, by overlap alone
 round_02_hybrid_match      310     and by the full matcher, which the genes follow
@@ -216,26 +216,19 @@ when you have more than one round.
 | `{feature}_round_{R}_{gene}` | Intensity of that gene in that round, e.g. `mean_round_01_PDYN` |
 | `plane` | Which functional plane this file covers |
 
-Functional cell, matched by overlap:
+Which functional cell it is. Both columns hold a functional cell id, from two independent
+matchers that can disagree:
 
 | Column | Meaning |
 |---|---|
-| `twoP_mask` | The matched functional cell, blank if none |
+| `twoP_mask` | The cell matched by mask overlap, blank if none |
 | `twoP_iou` | Overlap of that pair, in the functional plane |
-| `twoP_containment` | Fraction of the functional cell inside its FISH partner |
-| `HCR_containment` | Fraction of the FISH cell inside its functional partner |
-| `twoP_mask_size` | Size of the matched functional cell, in voxels |
-| `twoP_neighborhood_iou` | Whether the tissue around the cell also registers |
-
-Functional cell, matched by Soma-print. Independent of the overlap columns, and the two can
-disagree:
-
-| Column | Meaning |
-|---|---|
 | `twoP_somaprint_mask` | The cell Soma-print picked, confident or not |
-| `twoP_somaprint_best_score`, `_second_score` | Best and runner-up scores |
-| `twoP_somaprint_confident` | Whether best separates from runner-up. `False`, never blank |
-| `twoP_somaprint_mask_size` | Size of that cell, in voxels |
+| `twoP_somaprint_confident` | Whether that pick cleared its gate. `False`, never blank |
+
+A Soma-print pick is not always a confident one: in the demo, 1,387 cells get a pick and 1,149
+of those are confident. So `twoP_somaprint_mask.notna()` and `twoP_somaprint_confident` are
+different questions.
 
 Cell in each further FISH round `R`, one set per round. Absent for single-round runs:
 
@@ -255,9 +248,9 @@ by_iou    = df.round_02_iou_match.notna()
 recovered = df.round_02_matched_by == 'somaprint'
 ```
 
-The round columns carry no sizes or containments. Those stay in the matching table above, and
-3D cell sizes come from the published mask TIFFs with one `np.unique`. The functional columns
-do still carry them, since that match is the one most people filter on.
+No sizes, containments or intersections are repeated in this table. They are all columns of
+the matching table above, which is the full per-pair record, and 3D cell sizes come from the
+published mask TIFFs with one `np.unique`.
 
 In the demo, 1,199 of the 1,439 segmented functional cells get a 1:1 overlap match (83%),
 with a median overlap of 0.29 in the functional plane. Soma-print confidently calls 1,149.
