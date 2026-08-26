@@ -22,7 +22,7 @@ demo/
 │       ├── 2P/plane_0_hires.tiff        (2P hi-res stitched image, ~49 MB)
 │       ├── HCR/JS078_demo_HCR01.tiff    (5-channel HCR volume, full frame, ~774 MB)
 │       └── OUTPUT/2P/registered/        (pre-seeded landmarks + placement, so the run reproduces)
-│           ├── hires_stitched_plane0_to_HCR1_landmarks.csv   (18 BigWarp seed landmarks)
+│           ├── hires_stitched_plane0_to_HCR1_landmarks.csv   (18 BigWarp landmarks)
 │           ├── lowres_plane0_masks_in_hires_space.tiff       (2P placement in hi-res space)
 │           ├── lowres_meanImg_C0_plane0_rotated.tiff         (rotated 2P mean)
 │           └── hires_stitched_plane0_rotated.tiff            (rotated 2P hi-res)

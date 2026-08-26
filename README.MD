@@ -18,7 +18,7 @@ upstream, and EASI-PASS takes their output as input.
 | Functional field of view | One 2D mean image per plane, TIFF |
 | Molecular rounds | One multi-channel 3D volume per FISH round, TIFF |
 | Hi-res structural image *(optional)* | One stitched 2D TIFF per plane, used as an alignment bridge |
-| A few seed landmarks | Placed once in [BigWarp](https://imagej.net/plugins/bigwarp), between one functional plane and the reference FISH volume. Not needed for FISH-only runs, and the demo ships its own |
+| A few landmarks | Placed once in [BigWarp](https://imagej.net/plugins/bigwarp), between one functional plane and the reference FISH volume. Not needed for FISH-only runs, and the demo ships its own |
 
 Everything else is set in a manifest.
 
@@ -38,7 +38,7 @@ pip install -e .
 PyTorch). Everything else is a pip dependency, and `pip install -e .` covers every stage and
 mode. Optional extras: `.[notebooks]` for Jupyter, `.[analysis]` for the analysis notebooks.
 
-Cross-modal runs also need [Fiji](https://fiji.sc/)'s BigWarp for placing seed landmarks
+Cross-modal runs also need [Fiji](https://fiji.sc/)'s BigWarp for placing landmarks
 (Plugins > BigDataViewer > Big Warp). See [docs/landmarks.md](docs/landmarks.md).
 
 ## Start with the demo
@@ -105,7 +105,7 @@ A manifest with no `two_photon_imaging` section runs FISH rounds only, with noth
 pass. Use `--only_hcr` to skip the functional half of a manifest that has one.
 
 Cross-modal alignment is the step most likely to need another attempt, since it depends on
-your seed landmarks, the functional segmentation, and whether the recovered tissue actually
+your landmarks, the functional segmentation, and whether the recovered tissue actually
 contains the imaged field. `--check_alignment` settles that first:
 
 ```bash
@@ -122,18 +122,19 @@ the flag to finish. Everything the check produced is reused.
 ```
 Before any segmentation
   1. Per-plane prep              Rotate the functional mean image (and stitch it, for sbx)
-  2. Seed landmarks              BigWarp, functional plane against the acquired reference
-                                 FISH volume. These come first so a bad alignment shows up
-                                 before you spend an hour on Cellpose.
+  2. Landmarks                   BigWarp, functional plane against the acquired reference
+                                 EASI-FISH volume. These come first so a bad alignment shows
+                                 up before you spend an hour on Cellpose.
 
 Segmentation
   3. Functional                  Cellpose on each mean image
   4. Molecular                   Cellpose per FISH plane, linked across planes into 3D cells
 
 Molecular side (once, for all rounds)
-  5. Round-to-round registration Each round -> reference round. Cell centroids seed a global
-                                 affine (RANSAC), then block-wise deformable refinement
-                                 (BigStream). Labels are warped into the reference frame.
+  5. Round-to-round registration Each round -> reference round. Cell centroids initialize a
+                                 global affine (RANSAC), then block-wise deformable
+                                 refinement (BigStream). Labels are warped into the
+                                 reference frame.
   6. Probe intensity extraction  Per-cell fluorescence per channel, with local background
 
 Cross-modal (per plane)
@@ -141,7 +142,7 @@ Cross-modal (per plane)
   8. Registration                Landmarks -> thin-plate spline surface through the FISH
                                  volume -> rigid search -> global affine ->
                                  coarse-to-fine local tile cascade
-  9. Matching                    Mask overlap (IoU) and soma-print, reported per cell
+  9. Matching                    Mask overlap (IoU) and Soma-print, reported per cell
 
 Output
  10. Merged table                One row per cell: matched identities, per-gene intensities
@@ -170,7 +171,7 @@ functional/FISH cell pair, and `is_best_match` marks the accepted 1:1 call.
 | `containment_2p`, `containment_hcr_at_z` | Directional overlap, each way |
 | `mask1_size`, `mask2_size`, `mask2_size_at_mask1_z` | Mask sizes, in voxels |
 | `is_best_match` | The accepted overlap-based 1:1 match |
-| `somaprint_hcr_label` | The independent geometric matcher's call for this cell |
+| `somaprint_hcr_label` | Soma-print's call for this cell, independent of overlap |
 | `somaprint_best_score`, `somaprint_second_score` | Its best and runner-up scores |
 | `somaprint_confident` | Whether best separates significantly from runner-up |
 
@@ -188,11 +189,11 @@ file per feature, single header row.
 | `mask_id_main` | The FISH cell this row is about |
 | `{feature}_round_{R}_{gene}` | Intensity of that gene in that round, e.g. `mean_round_01_PDYN` |
 | `twoP_mask`, `twoP_iou` | Functional cell matched by overlap, and that overlap |
-| `twoP_somaprint_mask`, `twoP_somaprint_confident` | The geometric matcher's call, and its confidence |
+| `twoP_somaprint_mask`, `twoP_somaprint_confident` | Soma-print's call, and its confidence |
 | `round_{R}_iou_match`, `round_{R}_iou` | Cell in round R by overlap alone, and that overlap |
 | `round_{R}_hybrid_match` | Cell in round R by the full matcher |
-| `round_{R}_matched_by` | `overlap` if it cleared the IoU and neighbourhood gates, `somaprint` if geometry recovered it |
-| `round_{R}_somaprint_score`, `_second_score` | Scores behind a recovery, blank for a gate-clearing match |
+| `round_{R}_matched_by` | `overlap` if overlap alone was trusted (an anchor), `somaprint` if Soma-print recovered it |
+| `round_{R}_somaprint_score`, `_second_score` | Scores behind a Soma-print recovery, blank for an anchor |
 | `plane` | Which functional plane this file covers |
 
 The gene columns are joined on `round_{R}_hybrid_match`, so that column says whose intensities
@@ -320,7 +321,7 @@ failure modes and what each one points to.
 | `easipass/registrations.py` | Registration orchestration |
 | `easipass/registrations_utils.py` | Cross-modal registration algorithms |
 | `easipass/hcr_centroid_registration.py` | Centroid-seeded round-to-round registration |
-| `easipass/somaprint.py`, `somaprint_hcr.py` | Geometric cell matchers, cross-modal and round-to-round |
+| `easipass/somaprint.py`, `somaprint_hcr.py` | Soma-print matchers, cross-modal and round-to-round |
 
 The rest of `easipass/` is supporting code: tile stitching, automation checkpoints, BigStream
 wrappers, and analysis helpers.
