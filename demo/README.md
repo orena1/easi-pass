@@ -61,12 +61,8 @@ Both commands run from the repository root. There is nothing to edit: the manife
 
    **Answer the prompts as follows:**
    - `Verify 2P cellpose segmentations … press Enter` → press **Enter**.
-   - `Overwrite? [y/n]` (the `[registration] Existing output found …` prompt, low-res→hi-res step) → **n**.
-     This keeps the shipped 2P *placement*. The automated SIFT placement is fragile in
-     the tiff path (on this plane it lands ~100 px off, which makes the 2P→HCR
-     overlay come out stringy); the shipped placement is the production one, so the
-     alignment reproduces the paper-quality overlay. Answering `y` regenerates it and
-     may degrade the result.
+   - `Overwrite? [y/n]` (low-res→hi-res step) → **n**, which keeps the shipped 2P placement.
+     Answering `y` recomputes it and the demo may no longer reproduce.
    - `After checking QA images, choose [y/r/n]` (2P→HCR) → **y**.
 
 ## Expected output
@@ -84,23 +80,17 @@ signal is a 2P→HCR cascade `Final: IoU ~0.48` with an accepted small global sh
 
 ## Regenerating the demo data (maintainers)
 
-`demo_pre_run/` is a subset of the full-resolution JS078 dataset: one functional plane
-(plane 0) and one HCR round (01), assembled with:
+`demo_pre_run/` is one functional plane (0) and one HCR round (01) of JS078, at full
+resolution and full frame:
 ```bash
 python make_demo_data.py \
   --src /path/to/EASI_FISH/pipeline/JS078 \
   --dst ./demo_pre_run/JS078_demo
 ```
-The golden table in `completed/` is the match CSV from a validated run of that data; it is
-what users diff against. Build the release archive as noted in `fetch_demo_data.py`, attach
-it to a GitHub release, and update `RELEASE_BASE` and the sha256 there.
-Everything is shipped at full resolution and full frame. The HCR volume is copied
-verbatim (~774 MB, all 5 gene channels, all 39 Z slices), and the BigWarp landmarks are
-copied verbatim (no coordinate shift, since nothing is cropped).
+Then build the archive as noted in `fetch_demo_data.py`, attach it to a GitHub release, and
+update `RELEASE_BASE` and the sha256 there. The golden table in `completed/` is the match CSV
+from a validated run.
 
-**Why no spatial crop:** an earlier version XY-cropped the HCR volume to save size, but
-2P→HCR registration needs the surrounding HCR image context (and several landmark cells
-sit near the tissue edge). Cropping halved alignment quality (plane0 best-match median
-IoU dropped 0.38 to 0.16 versus the uncropped run) and made the overlay masks look
-misaligned. The data is a release asset, not a tracked file, so full-frame size is not a
-repo concern.
+Do not XY-crop the HCR volume to save size. Registration uses the surrounding tissue context
+and several landmarks sit near the edge; cropping dropped median IoU from 0.38 to 0.16. The
+data is a release asset, so its size is not a repo concern.

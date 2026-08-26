@@ -76,7 +76,7 @@ deleting it.
 The units in columns 6 to 8 are whichever units the volume declares. If the FISH TIFF
 carries no ImageJ micron calibration, BigWarp exports **pixels**, the pipeline divides them
 by a micron resolution anyway, and every landmark lands at the wrong scale. Nothing
-downstream can detect this, so the pipeline now refuses to run instead of guessing.
+downstream can detect this, so the pipeline refuses to run.
 
 Check with **Image > Properties** in Fiji: unit should be `micron`, with pixel
 width/height/depth set to your acquisition's voxel size. Fix it and re-export the landmarks
@@ -102,7 +102,7 @@ Re-run without the flag to continue. Check the QA overlays under
   `params.rotation_2p_to_HCR` and answer the orientation prompt with the flip that matches.
 - **Centre fine, edges stretched.** Too few landmarks, or none near the rim. Add points
   toward the boundary.
-- **Overlay looks stringy or scrambled.** The 2P placement is off rather than the landmarks.
+- **Overlay looks stringy or scrambled.** The 2P placement is off, not the landmarks.
   In hi-res mode, check the low-res to hi-res placement step.
 - **Overlay looks right, merged table looks wrong.** Suspect z. Confirm the FISH `z` values
   are per-cell focal slices and not all the same value.
