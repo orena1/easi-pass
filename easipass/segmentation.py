@@ -541,6 +541,56 @@ def get_neuropil_mask_square(volume, radius, bound, inds):
     return all_masks_locs
 
 
+def _stored_channel_names(df):
+    """The channel_name recorded per channel index in an existing intensities table."""
+    if not {'channel', 'channel_name'}.issubset(df.columns):
+        return None      # table predates the channel_name column; nothing to reconcile
+    pairs = df[['channel', 'channel_name']].drop_duplicates()
+    if pairs['channel'].duplicated().any():
+        return None      # one index carries two names; don't try to reconcile it
+    return list(pairs.sort_values('channel')['channel_name'])
+
+
+def _sync_channel_names(pkl_path, csv_path, channels_names, round_folder_name):
+    """Bring an already-extracted intensities table in line with the manifest's channel list.
+
+    Extraction is skipped whenever the pkl exists, so a channel name corrected in the manifest
+    would otherwise never reach the table -- the run reports success and every downstream
+    column keeps the old name. Names are labels on an existing measurement and nothing numeric
+    depends on them, so a pure rename is rewritten in place rather than paying for another
+    neuropil extraction. A change in channel COUNT is a different claim about the image and
+    cannot be patched this way.
+
+    Returns a one-line description of what was renamed, or None if nothing changed.
+    """
+    df = pd.read_pickle(pkl_path)
+    if df.empty:
+        return None
+    stored = _stored_channel_names(df)
+    if stored is None or stored == list(channels_names):
+        return None
+    if len(stored) != len(channels_names):
+        raise ValueError(
+            f"HCR channel-count mismatch for {round_folder_name}: the extracted table has "
+            f"{len(stored)} channels {stored}, the manifest lists {len(channels_names)} "
+            f"{list(channels_names)}.\nNames can be corrected in place, a count cannot -- "
+            f"delete {pkl_path} to re-extract.")
+
+    # Cast back to whatever the column already was -- real tables store this as a pyarrow-backed
+    # string, and .map() alone would quietly hand it back as object dtype.
+    renamed_col = df['channel'].map(dict(enumerate(channels_names)))
+    df['channel_name'] = renamed_col.astype(df['channel_name'].dtype)
+
+    # Write to a sibling temp file and swap it in. This table costs a full neuropil extraction
+    # to rebuild, so a crash partway through a rewrite must not be able to truncate it.
+    for path, writer in ((Path(csv_path), df.to_csv), (Path(pkl_path), df.to_pickle)):
+        tmp = path.with_name(path.name + '.tmp')
+        writer(tmp)
+        tmp.replace(path)
+    changed = [f"{a} -> {b}" for a, b in zip(stored, channels_names) if a != b]
+    return f"  {round_folder_name}: {', '.join(changed)}"
+
+
 def extract_probe_intensity(full_manifest):
     params = full_manifest['params']
     round_to_rounds, reference_round, register_rounds = verify_rounds(full_manifest, parse_registered = True,
@@ -568,6 +618,7 @@ def extract_probe_intensity(full_manifest):
 
     # Check which rounds need processing
     to_process = []
+    renamed = []
     for HCR_round_to_register in all_rounds:
         round_folder_name = get_round_folder_name(HCR_round_to_register, reference_round['round'])
         if HCR_round_to_register == reference_round['round']:
@@ -578,6 +629,19 @@ def extract_probe_intensity(full_manifest):
         pkl_output_path = output_folder / f"{round_folder_name}_probs_intensities.pkl"
         if not pkl_output_path.exists():
             to_process.append((HCR_round_to_register, round_folder_name, channels_names))
+        else:
+            # Already extracted -- the numbers stand, but the manifest may have corrected a name.
+            msg = _sync_channel_names(
+                pkl_output_path,
+                output_folder / f"{round_folder_name}_probs_intensities.csv",
+                channels_names, round_folder_name)
+            if msg:
+                renamed.append(msg)
+
+    if renamed:
+        rprint("[yellow]HCR intensities: channel names updated from the manifest[/yellow]")
+        for msg in renamed:
+            rprint(f"[yellow]{msg}[/yellow]")
 
     # Print summary
     if not to_process:
@@ -1943,6 +2007,9 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             f"Please ensure extract_probe_intensity() has completed for HCR round {reference_round['round']}."
         )
 
+    # Every merged table is a pivot of these; a table older than its sources is stale.
+    intensity_sources = [ref_intensities_path]
+
     # Pre-load HCR round mappings and intensities (feature-independent)
     HCR_rounds_names = register_rounds
     HCR_round_mapping_dict = []
@@ -1979,15 +2046,24 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
                 f"HCR round intensities not found: {round_intensities_path}\n"
                 f"Please ensure extract_probe_intensity() has completed for HCR round {HCR_round_to_register}."
             )
+        intensity_sources.append(round_intensities_path)
 
     # ========== PROCESS EACH FEATURE (now only pivots, no file I/O) ==========
 
+    # The gene names become COLUMN LABELS in the pivot below, so a name corrected in the
+    # manifest has to reach the merged tables too. Rebuilding one is pivots over data already
+    # loaded above, so rebuild on any source that is newer rather than only on absence.
+    newest_source = max(p.stat().st_mtime for p in intensity_sources)
+
     skipped_features = []
+    rebuilt_stale = 0
     for feature in tqdm(features_to_extract, desc="Merging features"):
         merged_table_file_path = merged_table_path / f'full_table_{feature}_twop_plane{plane}.pkl'
         if merged_table_file_path.exists():
-            skipped_features.append(feature)
-            continue
+            if merged_table_file_path.stat().st_mtime >= newest_source:
+                skipped_features.append(feature)
+                continue
+            rebuilt_stale += 1
 
         # Pivot reference round for this feature
         reference_round_intensities_pivot = pd.pivot(reference_round_intensities, index='mask_id', columns=['channel_name'], values=[feature]).reset_index()
@@ -2136,6 +2212,8 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
 
     if skipped_features:
         rprint(f"[dim]Skipped {len(skipped_features)} existing features[/dim]")
+    if rebuilt_stale:
+        rprint(f"[yellow]Rebuilt {rebuilt_stale} feature table(s) older than the extracted intensities[/yellow]")
 
     rprint("\n" + "="*80)
     rprint("[bold green] Match Aligned Masks COMPLETE[/bold green]")
