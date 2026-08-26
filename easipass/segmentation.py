@@ -541,6 +541,33 @@ def get_neuropil_mask_square(volume, radius, bound, inds):
     return all_masks_locs
 
 
+def _flatten_gene_pivot(piv, feature, round_name):
+    """Collapse a pivoted round to a single header row.
+
+    pd.pivot leaves a two-level column index, (feature, gene) for the gene columns and
+    (name, '') for everything else. Gene columns become `{feature}_round_{R}_{gene}`. The
+    round is spelled out for every round INCLUDING the reference, so no round is a special
+    case for whoever reads the table.
+    """
+    piv.columns = [f'{feature}_round_{round_name}_{gene}' if gene else str(top)
+                   for top, gene in piv.columns]
+    return piv
+
+
+def _merged_table_needs_rebuild(path, newest_source):
+    """Whether a merged feature table has to be rebuilt: missing, older than the intensities
+    it is a pivot of, or still carrying the old two-level column header."""
+    if not path.exists():
+        return True
+    if path.stat().st_mtime < newest_source:
+        return True
+    try:
+        columns = pd.read_pickle(path).columns
+    except Exception:
+        return True      # unreadable here (foreign pandas/pyarrow pickle) -- just rebuild it
+    return isinstance(columns, pd.MultiIndex)
+
+
 def _stored_channel_names(df):
     """The channel_name recorded per channel index in an existing intensities table."""
     if not {'channel', 'channel_name'}.issubset(df.columns):
@@ -2059,14 +2086,16 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
     rebuilt_stale = 0
     for feature in tqdm(features_to_extract, desc="Merging features"):
         merged_table_file_path = merged_table_path / f'full_table_{feature}_twop_plane{plane}.pkl'
+        if not _merged_table_needs_rebuild(merged_table_file_path, newest_source):
+            skipped_features.append(feature)
+            continue
         if merged_table_file_path.exists():
-            if merged_table_file_path.stat().st_mtime >= newest_source:
-                skipped_features.append(feature)
-                continue
             rebuilt_stale += 1
 
         # Pivot reference round for this feature
         reference_round_intensities_pivot = pd.pivot(reference_round_intensities, index='mask_id', columns=['channel_name'], values=[feature]).reset_index()
+        reference_round_intensities_pivot = _flatten_gene_pivot(
+            reference_round_intensities_pivot, feature, reference_round['round'])
         reference_round_intensities_pivot.rename(columns={'mask_id':'mask_id_main'},inplace=True)
 
         # Pivot each HCR round for this feature
@@ -2077,7 +2106,9 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
                 rprint(f"[yellow]Feature '{feature}' not found in round {HCR_round_to_register}[/yellow]")
                 HCR_rounds_intensities_pivot.append(pd.DataFrame())
                 continue
-            HCR_rounds_intensities_pivot.append(pd.pivot(HCR_round_intensities, index='mask_id', columns=['channel_name'], values=[feature]).reset_index())
+            HCR_rounds_intensities_pivot.append(_flatten_gene_pivot(
+                pd.pivot(HCR_round_intensities, index='mask_id', columns=['channel_name'], values=[feature]).reset_index(),
+                feature, HCR_round_to_register))
 
         ####       ####
         ###  MATCH  ###
@@ -2190,7 +2221,9 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         ####       ####
         ###  MERGE  ###
         ####       ####
-        HCR_main_pivot_merged = reference_round_intensities_pivot.copy().reset_index()
+        # drop=True: the pivot was already reset above, so a bare reset_index() here only
+        # added a stray 'index' column of 0..n-1 to the published table. Nothing reads it.
+        HCR_main_pivot_merged = reference_round_intensities_pivot.copy().reset_index(drop=True)
 
         for j in range(len(HCR_round_mapping_dict)):
             round_mask_name = f'round_{HCR_rounds_names[j]}_mask'
@@ -2209,6 +2242,9 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         # Add 'plane' column for clarity (each plane gets separate file)
         HCR_main_pivot_merged['plane'] = plane
         HCR_main_pivot_merged.to_pickle(merged_table_file_path)
+        # A pickle only opens in a pandas close enough to the one that wrote it, and newer
+        # pandas stores its strings via pyarrow. The csv is the copy anyone can open.
+        HCR_main_pivot_merged.to_csv(merged_table_file_path.with_suffix('.csv'), index=False)
 
     if skipped_features:
         rprint(f"[dim]Skipped {len(skipped_features)} existing features[/dim]")
