@@ -113,34 +113,42 @@ python master_pipeline.py --manifest examples/your_manifest.hjson --check_alignm
 ```
 
 That segments the reference round only, registers and matches the functional planes to it,
-reports the match rate, and stops, so the later rounds need not even be imaged yet. Review
-the overlays in `OUTPUT/2P/registered/QualityCheck/`, then re-run without the flag to finish.
-Everything the check produced is reused.
+writes the per-cell match tables and QA overlays, and stops, so the later rounds need not even
+be imaged yet. Review the overlays in `OUTPUT/2P/registered/QualityCheck/`, then re-run without
+the flag to finish. Everything the check produced is reused.
 
 ## What it does
 
 ```
-Molecular side (once, for all rounds)
-  1. Round-to-round registration     Each FISH round -> reference round.
-                                     Cell centroids seed a global affine (RANSAC),
-                                     then block-wise deformable refinement (BigStream).
-  2. 3D segmentation                 Cellpose per plane, linked across planes into 3D cells
-  3. Probe intensity extraction      Per-cell fluorescence per channel, with local background
+Before any segmentation
+  1. Per-plane prep              Rotate the functional mean image (and stitch it, for sbx)
+  2. Seed landmarks              BigWarp, functional plane against the acquired reference
+                                 FISH volume. These come first so a bad alignment shows up
+                                 before you spend an hour on Cellpose.
 
-Functional side (per plane)
-  4. 2D segmentation                 Cellpose on the mean image
-  5. Low-res -> hi-res placement     Only if a hi-res structural image is supplied
+Segmentation
+  3. Functional                  Cellpose on each mean image
+  4. Molecular                   Cellpose per FISH plane, linked across planes into 3D cells
+
+Molecular side (once, for all rounds)
+  5. Round-to-round registration Each round -> reference round. Cell centroids seed a global
+                                 affine (RANSAC), then block-wise deformable refinement
+                                 (BigStream). Labels are warped into the reference frame.
+  6. Probe intensity extraction  Per-cell fluorescence per channel, with local background
 
 Cross-modal (per plane)
-  6. Registration                    Seed landmarks -> thin-plate spline surface through the
-                                     FISH volume -> rigid search -> global affine ->
-                                     coarse-to-fine local tile cascade
-  7. Matching                        Mask overlap (IoU) and soma-print, reported per cell
+  7. Low-res -> hi-res placement Only if a hi-res structural image is supplied
+  8. Registration                Landmarks -> thin-plate spline surface through the FISH
+                                 volume -> rigid search -> global affine ->
+                                 coarse-to-fine local tile cascade
+  9. Matching                    Mask overlap (IoU) and soma-print, reported per cell
 
 Output
-  8. Merged table                    One row per cell: matched identities, per-gene
-                                     intensities across rounds, match-quality scores
+ 10. Merged table                One row per cell: matched identities, per-gene intensities
+                                 across rounds, match-quality scores
 ```
+
+FISH-only runs skip 1, 2, 3 and 7, and match rounds to each other at 9.
 
 Round-to-round registration uses cell centroids from the segmentation, not detected
 fluorescent spots. If rounds register poorly, check the reference round's Cellpose

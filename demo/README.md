@@ -56,8 +56,9 @@ Both commands run from the repository root. There is nothing to edit: the manife
    ```bash
    python master_pipeline.py --manifest demo/JS078_demo.hjson
    ```
-   Stages: HCR segmentation → 2P segmentation → low-res→hi-res placement → 2P→HCR
-   registration (using the shipped seed landmarks) → cell matching → merged table.
+   Stages: prep → landmarks (already shipped, so no prompt) → 2P segmentation → HCR
+   segmentation → probe intensities → low-res→hi-res placement → 2P→HCR registration →
+   cell matching → merged table.
 
    **Answer the prompts as follows:**
    - `Verify 2P cellpose segmentations … press Enter` → press **Enter**.
