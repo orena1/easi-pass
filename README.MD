@@ -184,17 +184,68 @@ thresholds.
 joins those matches to per-gene intensities. One row per FISH cell in the reference round, one
 file per feature, single header row.
 
+**One row, laid out.** Every row answers the same questions about one FISH cell: what are its
+genes, which functional cell is it, and which cell is it in each later round.
+
+```
+mask_id_main                 1     this row is FISH cell 1
+plane                        0
+
+mean_round_01_DAPI         6.8     its genes in the reference round,
+mean_round_01_SST          0.0     one column per channel
+
+twoP_mask                  412     which functional cell it is, by mask overlap
+twoP_iou                  0.51     ...plus containments, size, neighbourhood agreement
+
+twoP_somaprint_mask        412     and by Soma-print, which can pick a different cell
+twoP_somaprint_confident  True     ...plus best and runner-up scores
+
+round_02_iou_match         310     which cell it is in round 02, by overlap alone
+round_02_hybrid_match      310     and by the full matcher, which the genes follow
+round_02_matched_by    overlap     how the full matcher got there
+
+mean_round_02_TAC1         2.1     its genes in round 02
+```
+
+A blank means no match was found, not zero. Gene columns are always filled for the reference
+round, since measuring a cell does not depend on matching it. Round `02` columns only exist
+when you have more than one round.
+
 | Column | Meaning |
 |---|---|
 | `mask_id_main` | The FISH cell this row is about |
 | `{feature}_round_{R}_{gene}` | Intensity of that gene in that round, e.g. `mean_round_01_PDYN` |
-| `twoP_mask`, `twoP_iou` | Functional cell matched by overlap, and that overlap |
-| `twoP_somaprint_mask`, `twoP_somaprint_confident` | Soma-print's call, and its confidence |
+| `plane` | Which functional plane this file covers |
+
+Functional cell, matched by overlap:
+
+| Column | Meaning |
+|---|---|
+| `twoP_mask` | The matched functional cell, blank if none |
+| `twoP_iou` | Overlap of that pair, in the functional plane |
+| `twoP_containment` | Fraction of the functional cell inside its FISH partner |
+| `HCR_containment` | Fraction of the FISH cell inside its functional partner |
+| `twoP_mask_size` | Size of the matched functional cell, in voxels |
+| `twoP_neighborhood_iou` | Whether the tissue around the cell also registers |
+
+Functional cell, matched by Soma-print. Independent of the overlap columns, and the two can
+disagree:
+
+| Column | Meaning |
+|---|---|
+| `twoP_somaprint_mask` | The cell Soma-print picked, confident or not |
+| `twoP_somaprint_best_score`, `_second_score` | Best and runner-up scores |
+| `twoP_somaprint_confident` | Whether best separates from runner-up. `False`, never blank |
+| `twoP_somaprint_mask_size` | Size of that cell, in voxels |
+
+Cell in each further FISH round `R`, one set per round. Absent for single-round runs:
+
+| Column | Meaning |
+|---|---|
 | `round_{R}_iou_match`, `round_{R}_iou` | Cell in round R by overlap alone, and that overlap |
 | `round_{R}_hybrid_match` | Cell in round R by the full matcher |
 | `round_{R}_matched_by` | `overlap` if overlap alone was trusted (an anchor), `somaprint` if Soma-print recovered it |
 | `round_{R}_somaprint_score`, `_second_score` | Scores behind a Soma-print recovery, blank for an anchor |
-| `plane` | Which functional plane this file covers |
 
 The gene columns are joined on `round_{R}_hybrid_match`, so that column says whose intensities
 are on the row, and `round_{R}_iou_match` is what overlap alone would have said:
@@ -205,7 +256,9 @@ by_iou    = df.round_02_iou_match.notna()
 recovered = df.round_02_matched_by == 'somaprint'
 ```
 
-Sizes and containments are not repeated here; they stay in the matching table above.
+The round columns carry no sizes or containments. Those stay in the matching table above, and
+3D cell sizes come from the published mask TIFFs with one `np.unique`. The functional columns
+do still carry them, since that match is the one most people filter on.
 
 In the demo, 1,199 of the 1,439 segmented functional cells get a 1:1 overlap match (83%),
 with a median overlap of 0.29 in the functional plane. Soma-print confidently calls 1,149.
