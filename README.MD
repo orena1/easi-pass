@@ -1,6 +1,6 @@
 # EASI-PASS
 
-Align two-photon functional imaging to multi-round in-situ molecular imaging, cell by cell.
+Align two-photon functional imaging to multi-round in-situ molecular imaging. 
 
 EASI-PASS takes a mean image from a functional recording and one or more EASI-FISH confocal
 volumes, segments cells in both, registers them onto each other, matches cells across
