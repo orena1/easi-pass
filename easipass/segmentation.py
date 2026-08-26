@@ -1933,7 +1933,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
           soma_map     {ref → mov}   the hybrid's pick: a strict-IoU anchor
                                      (own IoU and neighbourhood IoU both over their gates)
                                      or, failing that, a soma-print rescue
-          soma_extra   {matched_by / somaprint_score / somaprint_second_score → {ref → v}};
+          soma_extra   {hybrid_matched_by / somaprint_score / somaprint_second_score → {ref → v}};
                        empty when somaprint_hcr did not run, and then soma_map is empty too.
 
         Quality is reported per stage, because the two are not comparable: an anchor is
@@ -1973,7 +1973,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             'somaprint_score': dict(zip(soma_keys, soma['somaprint_best_score'].astype(float))),
             'somaprint_second_score': dict(zip(soma_keys,
                                                soma['somaprint_second_score'].astype(float))),
-            'matched_by': (dict(zip(soma_keys, soma['somaprint_source']))
+            'hybrid_matched_by': (dict(zip(soma_keys, soma['somaprint_source']))
                            if 'somaprint_source' in soma.columns
                            else {k: 'somaprint' for k in soma_map}),
         }
@@ -2108,7 +2108,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         #   twoP_somaprint_confident      whether that pick cleared its gate
         # HCR round-to-round, one set per non-reference round R:
         #   round_{R}_iou_match, round_{R}_iou
-        #   round_{R}_hybrid_match, round_{R}_matched_by
+        #   round_{R}_hybrid_match, round_{R}_hybrid_matched_by
         #   round_{R}_somaprint_score, round_{R}_somaprint_second_score
         #
         # Sizes, containments, intersections and the neighbourhood term are deliberately NOT
@@ -2148,7 +2148,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
 
         # HCR round columns. Two matchers, two answers, never blended:
         #   round_{R}_iou_match     who plain IoU picked      + round_{R}_iou, that pair's overlap
-        #   round_{R}_hybrid_match  who the hybrid picked     + round_{R}_matched_by, which stage
+        #   round_{R}_hybrid_match  who the hybrid picked  + round_{R}_hybrid_matched_by, the stage
         #                           ('overlap' = cleared the strict IoU + neighbourhood gates;
         #                            'somaprint' = rescued geometrically) and, for a rescue,
         #                           the soma scores it was judged on.
@@ -2167,7 +2167,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             if extra:
                 reference_round_intensities_pivot[f'round_{round_name}_hybrid_match'] = _lookup_column(
                     ref_mask_ids, soma_map)
-                for key in ('matched_by', 'somaprint_score', 'somaprint_second_score'):
+                for key in ('hybrid_matched_by', 'somaprint_score', 'somaprint_second_score'):
                     reference_round_intensities_pivot[f'round_{round_name}_{key}'] = _lookup_column(
                         ref_mask_ids, extra.get(key, {}))
                 round_join_cols.append(f'round_{round_name}_hybrid_match')

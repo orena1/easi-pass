@@ -201,9 +201,9 @@ twoP_iou                  0.51     how good that overlap was
 twoP_somaprint_match       412     and by Soma-print, which can pick a different cell
 twoP_somaprint_confident  True     whether that pick cleared its gate
 
-round_02_iou_match         310     which cell it is in round 02, by overlap alone
-round_02_hybrid_match      310     and by the full matcher, which the genes follow
-round_02_matched_by    overlap     how the full matcher got there
+round_02_iou_match           310   which cell it is in round 02, by overlap alone
+round_02_hybrid_match        310   and by the full matcher, which the genes follow
+round_02_hybrid_matched_by overlap how the full matcher got there
 
 mean_round_02_TAC1         2.1     its genes in round 02
 ```
@@ -238,7 +238,7 @@ Cell in each further FISH round `R`, one set per round. Absent for single-round 
 |---|---|
 | `round_{R}_iou_match`, `round_{R}_iou` | Cell in round R by overlap alone, and that overlap |
 | `round_{R}_hybrid_match` | Cell in round R by the full matcher |
-| `round_{R}_matched_by` | `overlap` if overlap alone was trusted (an anchor), `somaprint` if Soma-print recovered it |
+| `round_{R}_hybrid_matched_by` | `overlap` if overlap alone was trusted (an anchor), `somaprint` if Soma-print recovered it |
 | `round_{R}_somaprint_score`, `_second_score` | Scores behind a Soma-print recovery, blank for an anchor |
 
 The gene columns are joined on `round_{R}_hybrid_match`, so that column says whose intensities
@@ -247,7 +247,7 @@ are on the row, and `round_{R}_iou_match` is what overlap alone would have said:
 ```python
 matched   = df.round_02_hybrid_match.notna()
 by_iou    = df.round_02_iou_match.notna()
-recovered = df.round_02_matched_by == 'somaprint'
+recovered = df.round_02_hybrid_matched_by == 'somaprint'
 ```
 
 No sizes, containments or intersections are repeated in this table. They are all columns of
