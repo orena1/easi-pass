@@ -62,7 +62,6 @@ Nothing to edit. The run pauses three times to let you check intermediate output
 | Template | For |
 |---|---|
 | [`demo_tiff.hjson`](examples/demo_tiff.hjson) | **Start here.** You supply a 2P mean image per plane as `plane_{N}.tiff` |
-| [`demo_suite2p.hjson`](examples/demo_suite2p.hjson) | Same, but point at your Suite2p folder and the mean image is pulled from `ops.npy` |
 | [`demo_hcr_only.hjson`](examples/demo_hcr_only.hjson) | FISH rounds alone, no functional data |
 
 A hi-res image and the single-round case both work with no manifest change; see the notes at
@@ -301,14 +300,16 @@ and when to change it.
 
 ### Functional input formats
 
-| `input_format` | Reads | Use when |
-|---|---|---|
-| `tiff` | `2P/plane_{N}.tiff` mean images | **The standard path.** Any microscope, any preprocessing |
-| `suite2p` | An existing Suite2p output folder | You already ran Suite2p and want the mean image pulled from it |
-| `sbx` | ScanBox `.sbx` via Suite2p | Andermann-lab internal acquisition format |
+Use `input_format: "tiff"`. It reads `2P/plane_{N}.tiff` mean images, works with any
+microscope and any preprocessing, and is the only path the templates and the demo use.
 
 `input_format` is required whenever there is a `two_photon_imaging` section. There is no
 default, an unrecognised value is an error, and no command-line switch overrides it.
+
+Two other readers exist for the acquisition setup this was built on, `suite2p` (pulls the mean
+image from an existing Suite2p `ops.npy`) and `sbx` (ScanBox). Both still work, but neither is
+the supported route: whatever produced your recording, export a mean image per plane as TIFF
+and the rest of the pipeline is identical.
 
 ### Hi-res structural images
 
