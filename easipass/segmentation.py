@@ -1894,7 +1894,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         """
         if not {'somaprint_confident', 'somaprint_hcr_label'}.issubset(matching_df.columns):
             return {}, {}
-        # Confidence outranks raw score, as in _build_consensus_lookups: the
+        # Confidence outranks raw score, as in _build_round_lookups: the
         # score scale is only meaningful within a confidence class, so sorting
         # on score alone let an unconfident pick take an HCR cell from a
         # confident one.
@@ -1920,19 +1920,26 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         }
         return mapping, metrics
 
-    def _build_consensus_lookups(matching_df):
-        """HCR↔HCR partner per reference cell, consensus of the two matchers: the
-        hybrid somaprint pick where present, else the IoU best-match. Returns
+    def _build_round_lookups(matching_df):
+        """HCR↔HCR partners per reference cell, as TWO independent answers.
 
-          mapping        {ref_label → mov_label}   (drives round_{R}_mask / gene join)
-          metrics        {METRIC_COLUMN → {ref → value}}  IoU/containment/size of the
-                         CHOSEN pair (not the IoU best-match row — so a soma-recovered
-                         pair carries its own low overlap, the recovery signal)
-          extras         {match_source / somaprint_best_score / somaprint_second_score
-                          → {ref → value}}; empty when the CSV predates somaprint.
+        The two matchers used to be blended into one consensus column, which meant the
+        published table could not answer "who did plain IoU pick?" at all -- that answer was
+        computed, used to fill gaps, and thrown away. Both are now returned unmixed and both
+        are published, so every question is one condition on one column.
 
-        Falls back to pure IoU best-match (empty extras) on legacy CSVs, so disabling
-        params.somaprint_hcr reproduces the historical table exactly.
+          iou_map      {ref → mov}   plain IoU best-match, no cutoffs
+          iou_metric   {ref → iou}   overlap of THAT pair
+          soma_map     {ref → mov}   the hybrid's pick: a strict-IoU anchor
+                                     (own IoU and neighbourhood IoU both over their gates)
+                                     or, failing that, a soma-print rescue
+          soma_extra   {matched_by / somaprint_score / somaprint_second_score → {ref → v}};
+                       empty when somaprint_hcr did not run, and then soma_map is empty too.
+
+        Quality is reported per stage, because the two are not comparable: an anchor is
+        judged by its overlap, a rescue by how far its best soma score beats the runner-up.
+        A rescue can legitimately have almost no overlap -- that is the point of it -- so
+        its IoU is not a quality signal and is not carried.
         """
         if 'is_best_match' in matching_df.columns:
             iou_best = matching_df[matching_df['is_best_match'] == True]
@@ -1940,59 +1947,37 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             iou_best = matching_df
         iou_map = {int(m2): int(m1) for m1, m2 in iou_best[['mask1', 'mask2']].values}
 
-        has_soma = {'somaprint_confident', 'somaprint_hcr_label'}.issubset(matching_df.columns)
-        extras = {}
-        if not has_soma:
-            mapping = dict(iou_map)
-        else:
-            # one row per moving cell, then dedupe to 1:1 on the reference label
-            # (highest soma score wins; overlap anchors carry NaN and lose ties).
-            # Confidence outranks raw score. Sorting on score alone let an
-            # unconfident pick scoring 90 take a reference cell away from a
-            # confident pick scoring 50, even though the score scale is only
-            # meaningful within a confidence class.
-            soma = (matching_df.dropna(subset=['somaprint_hcr_label'])
-                    .drop_duplicates('mask1')
-                    .sort_values(['somaprint_confident', 'somaprint_best_score'],
-                                 ascending=[False, False])
-                    .drop_duplicates('somaprint_hcr_label'))
-            soma_keys = soma['somaprint_hcr_label'].astype(int)
-            soma_map = dict(zip(soma_keys, soma['mask1'].astype(int)))
-            soma_bs = dict(zip(soma_keys, soma['somaprint_best_score'].astype(float)))
-            soma_ss = dict(zip(soma_keys, soma['somaprint_second_score'].astype(float)))
-            soma_src = (dict(zip(soma_keys, soma['somaprint_source']))
-                        if 'somaprint_source' in soma.columns else {})
-            # soma_map and iou_map are each injective, but their union is not.
-            # When soma-print moves mov cell A from reference X to reference Y
-            # and nobody soma-claims X, the IoU fallback would hand A to X as
-            # well -- A's gene intensities would then be joined onto two
-            # reference cells, with no change in row count to reveal it. A mov
-            # cell already claimed by soma-print is therefore not available to
-            # the fallback, and the unclaimed reference simply goes unmatched.
-            soma_claimed = set(soma_map.values())
-            mapping, src_map = {}, {}
-            for ref in set(iou_map) | set(soma_map):
-                if ref in soma_map:
-                    mapping[ref] = soma_map[ref]
-                    src_map[ref] = soma_src.get(ref, 'somaprint')
-                elif iou_map[ref] not in soma_claimed:
-                    mapping[ref] = iou_map[ref]
-                    src_map[ref] = 'iou'
-            extras = {'match_source': src_map,
-                      'somaprint_best_score': soma_bs,
-                      'somaprint_second_score': soma_ss}
+        iou_metric = {}
+        if 'iou_at_mask1_z' in iou_best.columns:
+            iou_metric = {int(m2): float(v) for m2, v
+                          in zip(iou_best['mask2'], iou_best['iou_at_mask1_z'])}
 
-        # IoU/containment/size of the CHOSEN (mov, ref) pair, looked up per-pair so a
-        # consensus that differs from the IoU best-match still reports its own overlap.
-        pair = list(zip(matching_df['mask1'].astype(int), matching_df['mask2'].astype(int)))
-        metrics = {}
-        for col in METRIC_COLUMNS:
-            if col in matching_df.columns:
-                pair_val = dict(zip(pair, matching_df[col].values))
-                metrics[col] = {ref: pair_val.get((mov, ref)) for ref, mov in mapping.items()}
-            else:
-                metrics[col] = {}
-        return mapping, metrics, extras
+        has_soma = {'somaprint_confident', 'somaprint_hcr_label'}.issubset(matching_df.columns)
+        if not has_soma:
+            return iou_map, iou_metric, {}, {}
+
+        # one row per moving cell, then dedupe to 1:1 on the reference label
+        # (highest soma score wins; overlap anchors carry NaN and lose ties).
+        # Confidence outranks raw score. Sorting on score alone let an
+        # unconfident pick scoring 90 take a reference cell away from a
+        # confident pick scoring 50, even though the score scale is only
+        # meaningful within a confidence class.
+        soma = (matching_df.dropna(subset=['somaprint_hcr_label'])
+                .drop_duplicates('mask1')
+                .sort_values(['somaprint_confident', 'somaprint_best_score'],
+                             ascending=[False, False])
+                .drop_duplicates('somaprint_hcr_label'))
+        soma_keys = soma['somaprint_hcr_label'].astype(int)
+        soma_map = dict(zip(soma_keys, soma['mask1'].astype(int)))
+        soma_extra = {
+            'somaprint_score': dict(zip(soma_keys, soma['somaprint_best_score'].astype(float))),
+            'somaprint_second_score': dict(zip(soma_keys,
+                                               soma['somaprint_second_score'].astype(float))),
+            'matched_by': (dict(zip(soma_keys, soma['somaprint_source']))
+                           if 'somaprint_source' in soma.columns
+                           else {k: 'somaprint' for k in soma_map}),
+        }
+        return iou_map, iou_metric, soma_map, soma_extra
 
     # ========== PRE-LOAD ALL DATA ONCE (optimization: avoid reloading per feature) ==========
 
@@ -2041,6 +2026,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
     HCR_rounds_names = register_rounds
     HCR_round_mapping_dict = []
     HCR_round_metrics_dict = []
+    HCR_round_soma_dict = []
     HCR_round_extra_dict = []
     preloaded_round_intensities = {}
 
@@ -2056,12 +2042,12 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
                 f"HCR round mapping file not found: {round_mapping_file_path}\n"
                 f"Please ensure align_masks() has completed for HCR round {HCR_round_to_register}."
             )
-        # Consensus of the IoU and somaprint matchers: round_{R}_mask follows the
-        # hybrid pick where somaprint matched, else the IoU best-match. Built from
-        # the FULL df (somaprint rows include is_best_match=False recoveries).
-        round_mapping, round_metrics, round_extra = _build_consensus_lookups(round_mapping_df)
-        HCR_round_mapping_dict.append(round_mapping)
-        HCR_round_metrics_dict.append(round_metrics)
+        # Both matchers, kept apart. Built from the FULL df (somaprint rows include
+        # is_best_match=False recoveries, which the IoU view filters out).
+        round_iou, round_iou_metric, round_soma, round_extra = _build_round_lookups(round_mapping_df)
+        HCR_round_mapping_dict.append(round_iou)
+        HCR_round_metrics_dict.append(round_iou_metric)
+        HCR_round_soma_dict.append(round_soma)
         HCR_round_extra_dict.append(round_extra)
 
         # Load intensities
@@ -2125,11 +2111,15 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         # 2P↔HCR (somaprint, geometric matcher):
         #   twoP_somaprint_mask, twoP_somaprint_best_score,
         #   twoP_somaprint_second_score, twoP_somaprint_mask_size
-        # HCR-level (matcher-independent):
-        #   HCR_mask_size
         # HCR round-to-round, one set per non-reference round R:
-        #   round_{R}_mask, round_{R}_iou, round_{R}_containment,
-        #   main_containment_round_{R}, round_{R}_mask_size
+        #   round_{R}_iou_match, round_{R}_iou,
+        #   round_{R}_hybrid_match, round_{R}_matched_by,
+        #   round_{R}_somaprint_score, round_{R}_somaprint_second_score
+        #
+        # Sizes and containments are deliberately NOT repeated here -- every one of them is
+        # already in MERGED/aligned_masks/{pair}.csv (mask1_size, mask2_size, intersection,
+        # both containments), and 3D cell sizes fall out of the published mask tiffs with
+        # one np.unique. This table's job is gene values attached to reference cells.
         #
         # See match_masks() and align_somaprint() docstrings for the
         # precise definition of each metric. `mask_id_main` always refers
@@ -2144,33 +2134,11 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             'neighborhood_iou':       'twoP_neighborhood_iou',
         }
 
-        def _round_col(metric, round_name):
-            return {
-                'iou_at_mask1_z':         f'round_{round_name}_iou',
-                'containment_2p':         f'round_{round_name}_containment',
-                'containment_hcr_at_z':   f'main_containment_round_{round_name}',
-                'mask1_size':             f'round_{round_name}_mask_size',
-            }[metric]
-
         def _lookup_column(mask_ids, dct):
             """Map an iterable of mask_id_main values through a dict (None if missing)."""
             return [dct.get(i) for i in mask_ids]
 
         ref_mask_ids = reference_round_intensities_pivot.mask_id_main
-
-        # HCR cell size at the warped 2P plane — always populated (matcher-
-        # independent). Drives downstream sliver filtering. In only_hcr mode
-        # there is no 2P plane to project against; fall back to full 3D
-        # voxel counts so the column has stable semantics within the table.
-        from . import somaprint as sp_lib
-        if only_hcr:
-            hcr_size_lookup = sp_lib.compute_full_hcr_sizes(
-                full_manifest, reference_round['round'])
-        else:
-            hcr_size_lookup = sp_lib.compute_plane_projected_hcr_sizes(
-                full_manifest, session, reference_round['round'])
-        reference_round_intensities_pivot['HCR_mask_size'] = _lookup_column(
-            ref_mask_ids, hcr_size_lookup)
 
         # 2P columns — IoU best-match path
         reference_round_intensities_pivot['twoP_mask'] = _lookup_column(ref_mask_ids, twoP_mapping_dict)
@@ -2201,26 +2169,35 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             _lookup_column(ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_confident', {})),
             index=reference_round_intensities_pivot.index).fillna(False).astype(bool)
 
-        # HCR round columns
+        # HCR round columns. Two matchers, two answers, never blended:
+        #   round_{R}_iou_match     who plain IoU picked      + round_{R}_iou, that pair's overlap
+        #   round_{R}_hybrid_match  who the hybrid picked     + round_{R}_matched_by, which stage
+        #                           ('overlap' = cleared the strict IoU + neighbourhood gates;
+        #                            'somaprint' = rescued geometrically) and, for a rescue,
+        #                           the soma scores it was judged on.
+        # Gene columns are joined on hybrid_match (see the MERGE block below), so that is the
+        # column saying whose intensities are on this row.
+        round_join_cols = []
         for j in range(len(HCR_round_mapping_dict)):
-            HCR_main_2_HCR_round = HCR_round_mapping_dict[j]
-            round_metrics = HCR_round_metrics_dict[j]
             round_name = HCR_rounds_names[j]
-            reference_round_intensities_pivot[f'round_{round_name}_mask'] = _lookup_column(
-                ref_mask_ids, HCR_main_2_HCR_round)
-            for src_col in METRIC_COLUMNS:
-                reference_round_intensities_pivot[_round_col(src_col, round_name)] = _lookup_column(
-                    ref_mask_ids, round_metrics.get(src_col, {}))
-            # Hybrid-matcher provenance (only when somaprint_hcr ran for this round):
-            # which matcher produced round_{R}_mask and the soma scores behind a repair.
+            reference_round_intensities_pivot[f'round_{round_name}_iou_match'] = _lookup_column(
+                ref_mask_ids, HCR_round_mapping_dict[j])
+            reference_round_intensities_pivot[f'round_{round_name}_iou'] = _lookup_column(
+                ref_mask_ids, HCR_round_metrics_dict[j])
+
+            soma_map = HCR_round_soma_dict[j]
             extra = HCR_round_extra_dict[j]
             if extra:
-                reference_round_intensities_pivot[f'round_{round_name}_match_source'] = _lookup_column(
-                    ref_mask_ids, extra.get('match_source', {}))
-                reference_round_intensities_pivot[f'round_{round_name}_somaprint_score'] = _lookup_column(
-                    ref_mask_ids, extra.get('somaprint_best_score', {}))
-                reference_round_intensities_pivot[f'round_{round_name}_somaprint_second_score'] = _lookup_column(
-                    ref_mask_ids, extra.get('somaprint_second_score', {}))
+                reference_round_intensities_pivot[f'round_{round_name}_hybrid_match'] = _lookup_column(
+                    ref_mask_ids, soma_map)
+                for key in ('matched_by', 'somaprint_score', 'somaprint_second_score'):
+                    reference_round_intensities_pivot[f'round_{round_name}_{key}'] = _lookup_column(
+                        ref_mask_ids, extra.get(key, {}))
+                round_join_cols.append(f'round_{round_name}_hybrid_match')
+            else:
+                # somaprint_hcr did not run for this round -- IoU is the only answer there is,
+                # so it is also what the gene columns are joined on.
+                round_join_cols.append(f'round_{round_name}_iou_match')
 
         ####       ####
         ###  MERGE  ###
@@ -2230,7 +2207,8 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         HCR_main_pivot_merged = reference_round_intensities_pivot.copy().reset_index(drop=True)
 
         for j in range(len(HCR_round_mapping_dict)):
-            round_mask_name = f'round_{HCR_rounds_names[j]}_mask'
+            # Genes follow the hybrid's pick, or IoU's when the hybrid did not run.
+            round_mask_name = round_join_cols[j]
 
             # Skip merge if the intensities DataFrame is empty (feature was missing for this round)
             if HCR_rounds_intensities_pivot[j].empty:
@@ -2317,7 +2295,11 @@ def print_match_summary(full_manifest: dict, all_planes: list):
                 f"soma-print {n_soma} ({100 * n_soma / denom:.0f}%)")
         if soma_matched is not None:
             for r in register_rounds:
-                col = f'round_{r}_mask'
+                # The column the round's gene values were joined on: the hybrid's pick,
+                # or IoU's when somaprint_hcr did not run for that round.
+                col = (f'round_{r}_hybrid_match'
+                       if f'round_{r}_hybrid_match' in df.columns
+                       else f'round_{r}_iou_match')
                 if col in df.columns:
                     in_round = int((soma_matched & df[col].notna()).sum())
                     line += f" → HCR{r}: {in_round}"

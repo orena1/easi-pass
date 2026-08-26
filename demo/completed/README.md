@@ -13,7 +13,7 @@ The per-cell 2P→HCR matching table produced at
 Each row is a candidate 2P↔HCR mask pair; `is_best_match == True` marks the accepted
 1:1 match, and the `somaprint_*` columns are the parallel geometric matcher's call.
 (The full per-cell feature table joined to the 5 HCR gene channels is also produced,
-as `OUTPUT/MERGED/aligned_extracted_features/full_table_*.pkl`.)
+as `OUTPUT/MERGED/aligned_extracted_features/full_table_*.csv` and `.pkl`.)
 
 ## Expected numbers (GPU + cellpose-SAM; yours will be close, not identical)
 
