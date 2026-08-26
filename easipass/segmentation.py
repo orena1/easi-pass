@@ -2243,8 +2243,11 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         HCR_main_pivot_merged['plane'] = plane
         HCR_main_pivot_merged.to_pickle(merged_table_file_path)
         # A pickle only opens in a pandas close enough to the one that wrote it, and newer
-        # pandas stores its strings via pyarrow. The csv is the copy anyone can open.
-        HCR_main_pivot_merged.to_csv(merged_table_file_path.with_suffix('.csv'), index=False)
+        # pandas stores its strings via pyarrow. The csv is the copy anyone can open. Built
+        # from the same f-string as the pkl: with_suffix() would cut at the first dot in a
+        # feature name (a float in stack_median_filter puts one there).
+        HCR_main_pivot_merged.to_csv(
+            merged_table_path / f'full_table_{feature}_twop_plane{plane}.csv', index=False)
 
     if skipped_features:
         rprint(f"[dim]Skipped {len(skipped_features)} existing features[/dim]")
