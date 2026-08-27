@@ -31,6 +31,10 @@
                 {
                     round: "01"
                     channels: ["DAPI", "PROBE_A", "PROBE_B"]   // DAPI must be first
+                    // Optional, and only a fallback. The volume's own calibration is read
+                    // from the file and always wins; this is used when the file has none.
+                    // Cross-modal runs need real calibration on the volume regardless,
+                    // because BigWarp writes landmarks in whatever units the file declares.
                     resolution: [1.515, 1.515, 5.0]            // x, y, z microns per voxel
                 }
                 {
