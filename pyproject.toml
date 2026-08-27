@@ -1,9 +1,13 @@
 [build-system]
-# 77 is the floor for the PEP 639 license fields used below. Older setuptools
-# rejects `license` as a plain SPDX string; newer setuptools rejects the
-# `{text = ...}` table it replaced, so the two forms cannot both be supported.
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+# hatchling and not setuptools, because setuptools writes an easipass.egg-info
+# directory into the source tree during every install, and shared filesystems
+# commonly refuse that:
+#     error: [Errno 1] Operation not permitted: '.../easipass.egg-info/tmpXXXX'
+# Lab code often lives on exactly such a mount, including NFS home directories,
+# so the failure is common and the message names nothing a reader can act on.
+# hatchling builds without touching the source, so installing from a share works.
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "easipass"
@@ -141,8 +145,15 @@ all = [
 [project.scripts]
 easipass = "master_pipeline:main"
 
-[tool.setuptools]
-py-modules = ["master_pipeline"]
+[tool.hatch.metadata]
+# bigstream and ClusterWrap are pinned to git commits, which hatchling treats as
+# direct references and refuses by default. They are not on PyPI, which is also
+# why this project cannot be published there.
+allow-direct-references = true
 
-[tool.setuptools.packages.find]
-include = ["easipass*"]
+[tool.hatch.build.targets.wheel]
+# master_pipeline.py is a top-level module, not part of the package, and it is
+# what `easipass = master_pipeline:main` resolves to. `packages` alone leaves it
+# out of the wheel and the console script then fails on import; an editable
+# install hides that, because the source directory is on the path anyway.
+only-include = ["easipass", "master_pipeline.py"]
