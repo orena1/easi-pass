@@ -24,8 +24,10 @@ authors = [
 # Core dependencies — needed for the main pipeline (master_pipeline.py + src/)
 dependencies = [
     # Scientific stack
-    # cellpose 4 (cellpose-SAM) runs on the numpy 2.x line; no upper cap.
-    "numpy>=1.26",
+    # cellpose 4 (cellpose-SAM) runs on the numpy 2.x line. The cap is a major
+    # version, not a tested ceiling: it only stops a resolver from silently
+    # crossing into a numpy 3 that nothing here has ever been run against.
+    "numpy>=1.26,<3",
     "scipy>=1.9",
     "pandas>=2.0",
     "scikit-image>=0.21",
@@ -35,13 +37,28 @@ dependencies = [
     "imagecodecs",
     "imageio",
     "pillow",
-    "opencv-python>=4.10",
+    # Both opencv distributions end up installed and both provide `cv2`:
+    # bigstream requires `opencv-python`, cellpose and suite2p require
+    # `opencv-python-headless`. They must therefore be held to the same major,
+    # or whichever unpacks last decides which `cv2` you get. headless is listed
+    # here only to pin it; nothing calls a GUI function (the sole use of cv2 in
+    # this package is `cv2.estimateAffine3D`).
+    "opencv-python>=4.10,<5",
+    "opencv-python-headless>=4.10,<5",
 
     # Registration
     "SimpleITK==2.3.1",
 
     # Segmentation — cellpose 4 (cellpose-SAM / cpsam) is the assumed backend
     "cellpose>=4.0",
+
+    # PyTorch, declared so that there is exactly one source of it. It used to
+    # arrive twice: once from the conda `pytorch` channel via environment.yml,
+    # and again as an undeclared transitive of cellpose and suite2p. The Linux
+    # wheels on PyPI bundle CUDA, so conda is not needed for GPU support.
+    # For a CPU-only box, install from the CPU index instead — see the README.
+    "torch>=2.5,<3",
+    "torchvision>=0.20,<1",
 
     # Visualization (used in core pipeline for QC outputs)
     "matplotlib>=3.9",
@@ -51,7 +68,11 @@ dependencies = [
     "pyyaml",
     "zarr>=2.12,<3",  # bigstream uses `from zarr import blosc`, removed in zarr 3
     "h5py>=3.8",
-    "numcodecs>=0.9",
+    # zarr 2.18 itself requires numcodecs<0.16. Leaving this uncapped is what
+    # sends pip backtracking: it takes numcodecs 0.16 first, discovers the
+    # conflict, then walks back down the zarr and numcodecs releases, building
+    # C extensions from sdists as it goes.
+    "numcodecs>=0.9,<0.16",
     "pydantic>=2.7",
     "flatten_json",
 

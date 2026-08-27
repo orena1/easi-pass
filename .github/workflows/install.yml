@@ -1,0 +1,112 @@
+name: install
+
+# Installation is the first thing a new lab does and the easiest thing to break
+# without noticing, because it breaks for them and not for us. Two checks: the
+# lock files still follow from pyproject.toml, and a clean machine can install
+# from them and import the package.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - pyproject.toml
+      - constraints.txt
+      - requirements-lock*.txt
+      - environment.yml
+      - .github/workflows/install.yml
+  schedule:
+    # Weekly, so that a dependency yanked or a git ref disappearing upstream
+    # surfaces here rather than in someone's first hour with the pipeline.
+    - cron: '0 6 * * 1'
+
+jobs:
+  locks-match-pyproject:
+    # Cheap, and catches the failure mode where someone edits a version range
+    # and the lock files silently go on pinning the old resolution.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Regenerate all three locks
+        # SNAPSHOT is the date the environment was last built and validated end
+        # to end; see the note in constraints.txt before changing it. It has to
+        # match in all three commands or the locks disagree with each other.
+        env:
+          SNAPSHOT: '2026-07-15'
+        run: |
+          uv pip compile pyproject.toml \
+            --python-platform x86_64-unknown-linux-gnu --python-version 3.12 \
+            --constraints constraints.txt --exclude-newer "$SNAPSHOT" \
+            --output-file requirements-lock.txt
+          uv pip compile pyproject.toml --all-extras \
+            --python-platform x86_64-unknown-linux-gnu --python-version 3.12 \
+            --constraints constraints.txt --exclude-newer "$SNAPSHOT" \
+            --output-file requirements-lock-all.txt
+          uv pip compile pyproject.toml \
+            --python-platform x86_64-unknown-linux-gnu --python-version 3.12 \
+            --constraints constraints.txt --torch-backend=cpu \
+            --exclude-newer "$SNAPSHOT" \
+            --output-file requirements-lock-cpu.txt
+
+      - name: Fail if they differ from what is committed
+        run: |
+          if ! git diff --exit-code -- requirements-lock*.txt; then
+            echo "::error::Lock files are out of date. Run the two uv pip compile"
+            echo "::error::commands above and commit the result."
+            exit 1
+          fi
+
+  install-from-lock:
+    # The actual user experience, on a machine with nothing on it. CPU-only, so
+    # this exercises the lock and the imports rather than the GPU path.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Reclaim disk
+        # The CUDA wheels bundled into the Linux torch build are large enough
+        # that the runner's preinstalled toolchains need to go first.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - name: Install from the lock, then the package itself
+        run: |
+          python -m pip install --upgrade pip
+          time pip install -r requirements-lock.txt
+          pip install -e . --no-deps
+
+      - name: pip's own consistency check
+        # Catches a lock that installs but leaves conflicting requirements —
+        # the two opencv distributions disagreeing on a major, for instance.
+        run: pip check
+
+      - name: Import every pipeline module
+        # Not `import easipass`: the package __init__ is a stub and
+        # master_pipeline defers its imports into main(), so neither one would
+        # touch a dependency. Importing the modules by name is what actually
+        # proves the install. Each one pulls its own third-party stack at module
+        # scope — torch, cellpose, suite2p, bigstream, SimpleITK, cv2.
+        run: |
+          python - <<'PY'
+          import importlib
+          mods = """analysis_utils auto_stitching automation bigstream_functions
+                    functional hcr_centroid_registration importers meta registrations
+                    registrations_landmarks registrations_utils segmentation somaprint
+                    somaprint_hcr tiling""".split()
+          for m in mods:
+              importlib.import_module(f"easipass.{m}")
+              print(f"  ok  easipass.{m}")
+          import cv2, torch, zarr
+          print("cv2", cv2.__version__, "| torch", torch.__version__, "| zarr", zarr.__version__)
+          PY
+
+      - name: The CLI answers
+        run: python master_pipeline.py --help

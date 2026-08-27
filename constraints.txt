@@ -1,0 +1,32 @@
+# Versions this pipeline has actually been run against, as opposed to versions
+# that merely satisfy the ranges in pyproject.toml. Input to the lock files, not
+# something you install directly.
+#
+# PyTorch: 2.5.1 is the version the old conda environment.yml installed
+# (`pytorch::pytorch=2.5`), so it is the one every result to date was produced
+# with. The PyPI wheel bundles CUDA 12.4 and needs an NVIDIA driver of 525 or
+# newer. Two reasons to raise it, both requiring you to regenerate the locks:
+# a GPU newer than the CUDA 12.4 wheels support (anything past Hopper), or a
+# security fix. pyproject.toml allows the whole 2.x line, so raising it here is
+# all that is needed.
+torch==2.5.1
+
+# ---------------------------------------------------------------------------
+# Snapshot date: 2026-07-15
+#
+# The locks are generated with `--exclude-newer 2026-07-15`, which resolves as
+# if it were that date. This is deliberate and it is the other half of the pin.
+#
+# Pinning exact versions alone would only mean everyone gets the same env; it
+# would not mean that env is one the pipeline has run in, because a lock
+# regenerated today picks up whatever released this morning. 2026-07-15 is the
+# date the canonical environment was last built and validated, so resolving at
+# it reconstructs the environment the published results came from rather than a
+# fresh one that merely satisfies the same ranges.
+#
+# To move the snapshot forward: change the date in the three uv commands in
+# .github/workflows/install.yml, regenerate, and re-run the demo against the
+# golden table in demo/completed/ before committing. Do not bump it as a
+# routine tidy-up — a newer snapshot is a claim that the pipeline was tested
+# there, and the demo run is what backs that claim.
+# ---------------------------------------------------------------------------
