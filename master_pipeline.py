@@ -47,7 +47,10 @@ except ImportError as exc:
             except Exception as _e2:          # noqa: BLE001 - reporting, not handling
                 _real = f"{_leaf}: {type(_e2).__name__}: {_e2}"
                 break
-    _env = os.environ.get('CONDA_DEFAULT_ENV') or os.environ.get('VIRTUAL_ENV') or '(none)'
+    # VIRTUAL_ENV first: a venv activated inside a conda env shadows it on PATH,
+    # so it is the one actually in use, and naming the conda env instead sends
+    # the reader to the wrong place.
+    _env = os.environ.get('VIRTUAL_ENV') or os.environ.get('CONDA_DEFAULT_ENV') or '(none)'
 
     _lines = ["EASI-PASS could not start: %s" % exc, ""]
     if len(_missing) > 3:
