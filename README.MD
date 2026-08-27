@@ -24,25 +24,40 @@ Everything else is set in a manifest.
 
 ## Installation
 
-Needs Linux. A GPU is optional, see below. Segmentation uses Cellpose 4 (cellpose-SAM).
+Four commands, and the only thing you need beforehand is
+[uv](https://docs.astral.sh/uv/):
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh      # skip if you have uv
-export PATH="$HOME/.local/bin:$PATH"
-
 git clone https://github.com/orena1/easi-pass.git
 cd easi-pass
 uv venv --python 3.12
-source .venv/bin/activate
 uv pip install -e . -c requirements.txt
 ```
 
-About four minutes, and the same commands whether or not you have a GPU.
+About four minutes. Then activate it, and do that in any new shell:
 
-[uv](https://docs.astral.sh/uv/) **fetches its own Python 3.12**, so this works whatever your
-machine already has. That is the reason it is the documented route: the pipeline needs 3.12,
-most systems ship something older, and installing into an older one fails with errors that
-point nowhere near the real cause.
+```bash
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+```
+
+<details>
+<summary>Installing uv, if you do not have it</summary>
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh                 # macOS, Linux
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"      # Windows
+```
+
+Then open a new shell, or `export PATH="$HOME/.local/bin:$PATH"`.
+</details>
+
+uv **fetches its own Python 3.12**, which is the reason it is the documented route. The
+pipeline needs 3.12, most machines ship something older, and installing into an older one
+fails with errors that point nowhere near the real cause.
+
+The four commands are identical on Linux, macOS and Windows, and give the same pinned
+versions on each. Development and testing happen on Linux, so that is where the pipeline is
+known to run end to end; the CUDA libraries are Linux-only, so a GPU only helps there.
 
 `requirements.txt` holds the exact versions the pipeline was validated with, and `-c` applies
 them, so you get that environment rather than whatever released this week. Keep the `-c` on
