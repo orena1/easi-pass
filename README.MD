@@ -22,12 +22,15 @@ upstream, and EASI-PASS takes their output as input.
 
 Everything else is set in a manifest.
 
+The run is not unattended. It stops three times: to let you place the landmarks, to check the
+functional segmentation, and to confirm the round-to-round alignment. Everything between those
+is automatic.
+
 ## Installation
 
-Pick whichever line you already live on. Both give the identical pinned environment.
+Two routes that produce the identical environment. Use whichever tool you already have.
 
-**Already use conda?** Three commands. `environment.yml` supplies only Python, so conda is not
-solving the scientific stack and this is quick:
+**With conda:**
 
 ```bash
 git clone https://github.com/orena1/easi-pass.git
@@ -36,8 +39,8 @@ conda env create -f environment.yml && conda activate easipass
 pip install -e . -c requirements.txt
 ```
 
-**Otherwise, [uv](https://docs.astral.sh/uv/)**, which fetches its own Python 3.12 so it does
-not matter what the machine has:
+**With [uv](https://docs.astral.sh/uv/)**, a Python installer that downloads its own copy of
+Python, so nothing has to be set up first:
 
 ```bash
 git clone https://github.com/orena1/easi-pass.git
@@ -46,9 +49,13 @@ uv venv --python 3.12 && source .venv/bin/activate
 uv pip install -e . -c requirements.txt
 ```
 
-Either way, about four minutes, and you reactivate the environment in each new shell
-(`conda activate easipass`, or `source .venv/bin/activate`; on Windows
+Either takes about four minutes. In every new shell, activate the environment again:
+`conda activate easipass`, or `source .venv/bin/activate` (on Windows,
 `.venv\Scripts\activate`).
+
+Why two routes, and why not plain `pip`: the pipeline needs Python 3.12, most machines ship
+something older, and installing into an older one fails with errors that name the wrong thing.
+conda and uv each supply 3.12 themselves. Plain `pip` uses whatever is already there.
 
 <details>
 <summary>Installing uv, if you do not have it</summary>
@@ -76,21 +83,17 @@ If `python3 -m venv` itself fails, your distribution splits it into a separate p
 (`sudo apt install python3-venv` on Debian and Ubuntu).
 </details>
 
-The pipeline needs Python 3.12 and most systems ship something older, which is the one thing
-worth getting right: installing into an older Python fails with errors that point nowhere near
-the real cause. conda and uv both sidestep it by supplying 3.12 themselves.
-
-`requirements.txt` holds the exact versions the pipeline was validated with, and `-c` applies
-them, so you get that environment and not whatever released this week. Keep the `-c` on any
-later install into the same environment, for the same reason:
+`requirements.txt` lists the exact versions the pipeline was tested with, and `-c` holds the
+install to them, so you get that environment and not whatever released this week. Keep `-c` on
+any later install into the same environment:
 
 ```bash
 pip install -e ".[notebooks,analysis]" -c requirements.txt      # notebooks and analysis
 ```
 
-The commands are the same on Linux, macOS and Windows and give the same pinned versions on
-each. Development and testing happen on Linux, so that is where the pipeline is known to run
-end to end; the CUDA libraries are Linux-only, so a GPU only helps there.
+These commands work the same on Linux, macOS and Windows, and give the same versions on each.
+The pipeline is developed and tested on Linux, so that is where it is known to run end to end.
+The CUDA libraries are Linux-only, so a GPU only helps there.
 
 Clone to local disk, not a network share: the editable install writes alongside the package
 and fails on some mounts.
