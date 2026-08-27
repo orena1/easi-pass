@@ -24,34 +24,31 @@ Everything else is set in a manifest.
 
 ## Installation
 
-Needs Linux. A GPU is optional — see below. Segmentation uses Cellpose 4 (cellpose-SAM).
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+Needs Linux and Python 3.12. A GPU is optional — see below. Segmentation uses Cellpose 4
+(cellpose-SAM).
 
 ```bash
 git clone https://github.com/orena1/easi-pass.git
 cd easi-pass
-
-uv venv --python 3.12
+python3 -m venv .venv
 source .venv/bin/activate
-
-uv pip install -r requirements.txt
-uv pip install -e . --no-deps
+pip install -e . -c requirements.txt
 ```
 
-About four minutes, and uv fetches its own Python, so nothing else has to be installed
-first. One file, whether or not you have a GPU. `requirements.txt` pins every version
-exactly, so nothing is resolved on your machine and you get the environment the pipeline was
-validated in rather than whatever released this week.
+About four minutes, and the same commands whether or not you have a GPU.
+`requirements.txt` holds the exact versions the pipeline was validated with, and `-c` applies
+them, so you get that environment rather than whatever released this week. Keep the `-c` on
+any later install into the same environment, for the same reason.
 
-For the notebooks, add the extras on top:
+If your system has no Python 3.12, [uv](https://docs.astral.sh/uv/getting-started/installation/)
+will fetch one: use `uv venv --python 3.12` in place of the `venv` line, then
+`uv pip install -e . -c requirements.txt`.
+
+For the notebooks and analysis extras:
 
 ```bash
-uv pip install -e ".[notebooks,analysis]" -c requirements.txt
+pip install -e ".[notebooks,analysis]" -c requirements.txt
 ```
-
-Keep the `-c`. Without it, Jupyter's own dependencies pull newer numpy and pandas than the
-pinned ones and quietly undo the versions above.
 
 Clone to local disk, not a network share — the editable install writes alongside the package
 and fails on some mounts.
@@ -71,8 +68,7 @@ reports `libmamba`.
 ```bash
 conda env create -f environment.yml
 conda activate easipass
-pip install -r requirements.txt
-pip install -e . --no-deps
+pip install -e . -c requirements.txt
 ```
 </details>
 

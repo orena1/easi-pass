@@ -6,8 +6,7 @@
 #
 #   conda env create -f environment.yml
 #   conda activate easipass
-#   pip install -r requirements.txt
-#   pip install -e . --no-deps
+#   pip install -e . -c requirements.txt
 #
 # If `Collecting package metadata` takes a long time, that is conda indexing all
 # of conda-forge and is not specific to this project. Use miniforge and check
