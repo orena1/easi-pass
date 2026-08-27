@@ -64,9 +64,12 @@ except ImportError as exc:
             "",
             "If you have not installed EASI-PASS yet, from the repository root:",
             "",
-            "    python3 -m venv .venv",
+            "    uv venv --python 3.12",
             "    source .venv/bin/activate",
-            "    pip install -e . -c requirements.txt",
+            "    uv pip install -e . -c requirements.txt",
+            "",
+            "uv fetches its own Python 3.12, so it does not matter what this machine has.",
+            "Install it with: curl -LsSf https://astral.sh/uv/install.sh | sh",
         ]
     elif _missing:
         _lines += [
@@ -75,7 +78,7 @@ except ImportError as exc:
             "",
             "Reinstall them with, from the repository root:",
             "",
-            "    pip install -e . -c requirements.txt",
+            "    uv pip install -e . -c requirements.txt",
         ]
     elif _real:
         # Everything on the list is present, but an internal module still failed to import. The
@@ -92,7 +95,7 @@ except ImportError as exc:
             "If that names a third-party package, install it and add it to _REQUIRED in",
             "master_pipeline.py so the next person gets told directly:",
             "",
-            "    pip install -e . -c requirements.txt",
+            "    uv pip install -e . -c requirements.txt",
         ]
     else:
         _lines += [

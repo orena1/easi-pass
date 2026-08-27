@@ -24,34 +24,59 @@ Everything else is set in a manifest.
 
 ## Installation
 
-Needs Linux and Python 3.12. A GPU is optional — see below. Segmentation uses Cellpose 4
-(cellpose-SAM).
+Needs Linux. A GPU is optional, see below. Segmentation uses Cellpose 4 (cellpose-SAM).
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh      # skip if you have uv
+export PATH="$HOME/.local/bin:$PATH"
+
 git clone https://github.com/orena1/easi-pass.git
 cd easi-pass
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -e . -c requirements.txt
+```
+
+About four minutes, and the same commands whether or not you have a GPU.
+
+[uv](https://docs.astral.sh/uv/) **fetches its own Python 3.12**, so this works whatever your
+machine already has. That is the reason it is the documented route: the pipeline needs 3.12,
+most systems ship something older, and installing into an older one fails with errors that
+point nowhere near the real cause.
+
+`requirements.txt` holds the exact versions the pipeline was validated with, and `-c` applies
+them, so you get that environment rather than whatever released this week. Keep the `-c` on
+any later install into the same environment, for the same reason.
+
+For the notebooks and analysis extras:
+
+```bash
+uv pip install -e ".[notebooks,analysis]" -c requirements.txt
+```
+
+Clone to local disk, not a network share — the editable install writes alongside the package
+and fails on some mounts.
+
+<details>
+<summary>If you already have Python 3.12 and would rather not install uv</summary>
+
+Check first, because the failure mode otherwise is obscure:
+
+```bash
+python3 -V        # must be 3.12 or newer
+```
+
+Then the standard tools work:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e . -c requirements.txt
 ```
 
-About four minutes, and the same commands whether or not you have a GPU.
-`requirements.txt` holds the exact versions the pipeline was validated with, and `-c` applies
-them, so you get that environment rather than whatever released this week. Keep the `-c` on
-any later install into the same environment, for the same reason.
-
-If your system has no Python 3.12, [uv](https://docs.astral.sh/uv/getting-started/installation/)
-will fetch one: use `uv venv --python 3.12` in place of the `venv` line, then
-`uv pip install -e . -c requirements.txt`.
-
-For the notebooks and analysis extras:
-
-```bash
-pip install -e ".[notebooks,analysis]" -c requirements.txt
-```
-
-Clone to local disk, not a network share — the editable install writes alongside the package
-and fails on some mounts.
+If `python3 -m venv` itself fails, your distribution splits it into a separate package
+(`sudo apt install python3-venv` on Debian and Ubuntu). uv needs none of this.
+</details>
 
 <details>
 <summary>If you have to use conda</summary>

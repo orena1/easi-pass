@@ -62,9 +62,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v7
+        # Deliberately no setup-python. The README's route relies on uv fetching
+        # its own 3.12, because most machines ship something older; running this
+        # job on a runner that was handed a 3.12 would test a claim nobody makes.
 
       - name: Reclaim disk
         # The Linux torch wheels bundle CUDA, which is most of a 3 GB download,
@@ -73,16 +74,22 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           df -h /
 
-      - name: Install
+      - name: Install exactly as the README says
         run: |
-          python -m pip install --upgrade pip
-          time pip install -e . -c requirements.txt
+          uv venv --python 3.12
+          time uv pip install -e . -c requirements.txt
+          # Each `run:` is a fresh shell, so `source .venv/bin/activate` would not
+          # survive into the next step. Publishing both is what makes every step
+          # below act on this environment: PATH for `python`, VIRTUAL_ENV for uv.
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
 
-      - name: pip's own consistency check
+      - name: Dependency consistency check
         # Catches an environment that installs but leaves conflicting
         # requirements -- the two opencv distributions disagreeing on a major,
-        # for instance.
-        run: pip check
+        # for instance. `uv pip check` and not `pip check`: uv venv does not seed
+        # pip into the environment, which is the point of it being fast.
+        run: uv pip check
 
       - name: Import every pipeline module
         # Not `import easipass`: the package __init__ is a stub and
