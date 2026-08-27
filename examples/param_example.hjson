@@ -19,7 +19,12 @@ HCR_to_HCR_registration:{
         "context_radius":[12, 12, 2]   // block context window in VOXELS (current local style)
         // "context_radius_um":60       // OPT-IN: use a um-window for blocks instead (experiment)
         "match_threshold":0.3
-        "max_spot_match_distance_um":60
+        "max_spot_match_distance_um":200 // cap on how far a cell may have moved between rounds.
+                                       // Set below the real displacement and every candidate pair
+                                       // in a block is rejected: the block falls back to no
+                                       // correction, silently. Keep it <= blocksize_xy * um-per-px
+                                       // (200px at 1.26um/px reaches ~126um), since a larger cap
+                                       // only adds rival candidates the block cannot act on.
         "count_floor":8                // minimum centroids per block
         "match_floor":4                // minimum point matches per block
         "adaptive_edges":true          // bounds-safe edge/thin-z context padding

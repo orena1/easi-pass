@@ -153,6 +153,69 @@ def _check_label_range(masks, context):
     return masks
 
 
+# Masks a user supplies instead of segmenting. Accepted in whichever form their
+# tool produced: a label image, a saved array, or the file the Cellpose GUI
+# writes when someone hand-corrects. Checked before use, because a mask on the
+# wrong grid still registers and still matches -- it just answers the wrong
+# question, and nothing downstream can tell.
+_USER_MASK_SUFFIXES = ('_masks.tiff', '_masks.tif', '_masks.npy', '_seg.npy')
+
+
+def _validate_user_masks(masks, expected_shape, source, what):
+    """Check a user-supplied label array against the image it claims to describe."""
+    if not np.issubdtype(masks.dtype, np.integer):
+        raise ValueError(
+            f"{what}: masks must be whole-number labels, but {source.name} is "
+            f"{masks.dtype}.\n  {source}\n"
+            "  Save the label image itself, not a probability map or a float cast.")
+    if masks.shape != expected_shape:
+        raise ValueError(
+            f"{what}: masks are {masks.shape} but the image they describe is "
+            f"{expected_shape}.\n  {source}\n"
+            "  Masks must be on the same pixel grid as the image, uncropped and "
+            "unresampled. A 3D FISH volume is indexed (Z, Y, X).")
+    if masks.max() == 0:
+        raise ValueError(
+            f"{what}: {source.name} contains no cells (every pixel is 0).\n  {source}")
+    _check_label_range(masks, f"reading {source.name}")
+    return masks
+
+
+def _find_user_masks(directory, stem):
+    """Return the first user-supplied mask file for `stem`, or None."""
+    for suffix in _USER_MASK_SUFFIXES:
+        candidate = Path(directory) / f"{stem}{suffix}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _read_user_masks(path):
+    """Read a label array from any of the accepted mask forms.
+
+    `_seg.npy` is Cellpose's own format, a dict whose 'masks' key holds the
+    labels; `_masks.npy` is a plain saved array. Keeping the two filenames
+    distinct means we never have to guess which one we were handed.
+    """
+    path = Path(path)
+    if path.suffix in ('.tiff', '.tif'):
+        return tif_imread(path)
+    loaded = np.load(path, allow_pickle=True)
+    if path.name.endswith('_seg.npy'):
+        try:
+            return loaded.item()['masks']
+        except (AttributeError, KeyError, ValueError) as exc:
+            raise ValueError(
+                f"{path.name} is not a Cellpose segmentation file: expected a dict "
+                f"with a 'masks' key ({exc}).\n  {path}\n"
+                "  To supply a plain label array, name it '_masks.npy' instead.") from exc
+    if loaded.dtype == object or loaded.ndim == 0:
+        raise ValueError(
+            f"{path.name} holds a Python object, not a label array.\n  {path}\n"
+            "  If this is Cellpose output, name it '_seg.npy' instead.")
+    return loaded
+
+
 # cellpose's stitch3D allocates new cumulative labels at masks.dtype (uint16),
 # which overflows once pre-merge candidates across slices exceed 65535. We wrap it
 # to upcast to int32. This mutates a cellpose global, so it is applied lazily and
@@ -332,13 +395,33 @@ def run_cellpose(full_manifest):
     to_process = []
     for HCR_round in all_rounds:
         round_folder_name = get_round_folder_name(HCR_round, reference_round['round'])
-        output_path = output_root(full_manifest) / 'HCR' / 'cellpose' / f"{round_folder_name}_masks.tiff"
+        cellpose_dir = output_root(full_manifest) / 'HCR' / 'cellpose'
+        output_path = cellpose_dir / f"{round_folder_name}_masks.tiff"
         mov = reference_round if HCR_round == reference_round['round'] else round_to_rounds[HCR_round]
         source_path = mov['image_path']
         if output_path.exists():
             skipped.append(round_folder_name)
-        else:
-            to_process.append((round_folder_name, source_path, output_path))
+            continue
+
+        # Masks the user segmented elsewhere. Checked against the volume they
+        # describe before use: masks on a different grid register and match
+        # perfectly well, they just describe different cells, and no later
+        # stage can notice.
+        supplied = _find_user_masks(cellpose_dir, round_folder_name)
+        if supplied is not None:
+            with TiffFile(str(source_path)) as tf:
+                raw_shape = tf.series[0].shape       # shape without loading the volume
+            masks = _read_user_masks(supplied)
+            expected = tuple(s for i, s in enumerate(raw_shape) if i != 1)  # (Z,C,Y,X) -> (Z,Y,X)
+            _validate_user_masks(masks, expected, supplied, f"{round_folder_name} masks")
+            cellpose_dir.mkdir(parents=True, exist_ok=True)
+            tif_imsave(output_path, masks.astype(np.uint16))
+            rprint(f"  [green]Using your masks[/green] for {round_folder_name}: "
+                   f"{supplied.name} ({int(masks.max())} cells). Cellpose not run.")
+            skipped.append(round_folder_name)
+            continue
+
+        to_process.append((round_folder_name, source_path, output_path))
 
     # Print summary
     if not to_process:
@@ -444,11 +527,30 @@ def extract_2p_cellpose_masks(full_manifest: dict, session: dict):
 
     if twop_cellpose_file.exists():
         rprint(f"[dim]2P cellpose plane {current_plane}: exists[/dim]")
-    else:
-        if not tiff_path.exists():
-            raise FileNotFoundError(f"2P tiff file not found: {tiff_path}")
-        rprint(f"[bold]Running Cellpose on 2P plane {current_plane}[/bold]")
-        run_cellpose_2p(tiff_path, twop_cellpose_file, params['2p_cellpose'])
+        return twop_cellpose_file
+
+    if not tiff_path.exists():
+        raise FileNotFoundError(f"2P tiff file not found: {tiff_path}")
+
+    # Masks the user segmented elsewhere, in whichever form their tool wrote.
+    # Cellpose's own _masks.tiff is one of the accepted names, so whatever this
+    # step produced can be handed straight back to it.
+    stem = f'lowres_meanImg_C0_plane{current_plane}'
+    supplied = _find_user_masks(cellpose_path, stem)
+    if supplied is not None:
+        mean_image = tif_imread(tiff_path)
+        masks = _read_user_masks(supplied)
+        _validate_user_masks(masks, mean_image.shape, supplied,
+                             f"2P masks for plane {current_plane}")
+        np.save(str(twop_cellpose_file), {'masks': masks, 'img': mean_image})
+        rprint(f"  [green]Using your masks[/green] for 2P plane {current_plane}: "
+               f"{supplied.name} ({int(masks.max())} cells). Cellpose not run.")
+        return twop_cellpose_file
+
+    rprint(f"[dim]  2P plane {current_plane}: no masks supplied "
+           f"({stem}_masks.tiff), segmenting[/dim]")
+    rprint(f"[bold]Running Cellpose on 2P plane {current_plane}[/bold]")
+    run_cellpose_2p(tiff_path, twop_cellpose_file, params['2p_cellpose'])
 
     return twop_cellpose_file
 
@@ -1357,8 +1459,7 @@ def adjust_landmarks_for_plane(reference_landmarks_path, new_landmarks_path, ref
 
 
 def print_matching_summary(df: pd.DataFrame, source_name: str, target_name: str):
-    """One-glance summary: how many source cells got a unique 1:1 match, how many didn't, and
-    the median overlap of the matches (the metric that drives matching)."""
+    """How many source cells overlap a target cell, and how many of those got a 1:1 call."""
     if df.empty:
         rprint(f"[yellow]  {source_name} → {target_name}: no overlapping cells found[/yellow]")
         return
@@ -1368,10 +1469,16 @@ def print_matching_summary(df: pd.DataFrame, source_name: str, target_name: str)
         rprint(f"  [dim]{source_name} → {target_name}: {len(df)} matches (old format)[/dim]")
         return
 
+    # Count cells that actually share voxels, not every cell named in the table.
+    # Soma-print merges its own picks into this same CSV afterwards, including
+    # cells that overlapped nothing -- so counting rows made a re-read of the
+    # file report a different, worse rate for identical data (1321 -> 1420 here),
+    # and called cells "unmatched" that were never in the running.
+    overlapping = df[df['intersection'] > 0] if 'intersection' in df.columns else df
+    n_src = int(overlapping['mask1'].nunique())
+
     best = df[df['is_best_match'] == True]
     n_best = len(best)
-    n_src = int(df['mask1'].nunique())            # source cells overlapping >=1 target (denominator)
-    n_unmatched = n_src - n_best                  # overlapped something but lost the greedy 1:1
     rate = n_best / n_src if n_src else 0.0
 
     # iou_at_mask1_z drives is_best_match: 3D IoU with mask2's denominator restricted to mask1's
@@ -1379,9 +1486,8 @@ def print_matching_summary(df: pd.DataFrame, source_name: str, target_name: str)
     iou_col = 'iou_at_mask1_z' if 'iou_at_mask1_z' in best.columns else 'iou'
     med_iou = best[iou_col].median() if n_best else 0.0
 
-    rprint(f"  [cyan]{source_name} → {target_name}:[/cyan] [b]{n_best}[/b] cells matched 1:1 "
-           f"([b]{rate*100:.0f}%[/b] of {n_src} overlapping) · {n_unmatched} unmatched (lost competition)")
-    line = f"    median IoU {med_iou:.3f}"
+    line = (f"  [cyan]{source_name} → {target_name}:[/cyan] [b]{n_best}[/b] of {n_src} "
+            f"overlapping cells matched 1:1 ([b]{rate*100:.0f}%[/b]) · median IoU {med_iou:.3f}")
     if n_best and 'containment_2p' in best.columns:
         line += f" · median containment {best['containment_2p'].median():.3f}"
     rprint(line)

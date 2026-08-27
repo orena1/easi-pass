@@ -48,7 +48,10 @@
                 overlap: 0.5
                 context_radius: [12, 12, 2]
                 match_threshold: 0.3
-                max_spot_match_distance_um: 60
+                // How far a cell may have moved between rounds. Too low and every
+                // candidate pair in a block is rejected, the block quietly falls back
+                // to no correction. Keep it under blocksize_xy * um-per-px.
+                max_spot_match_distance_um: 200
                 count_floor: 8
                 match_floor: 4
                 adaptive_edges: true

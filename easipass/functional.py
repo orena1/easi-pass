@@ -159,7 +159,11 @@ def _rotate_plane(full_manifest, save_filename_C, save_path_registered, function
         save_filename_rotated = save_path_registered / f'{save_filename_C.stem}_rotated.tiff'
 
     if save_filename_rotated.exists():
-        print(f"Plane {functional_plane}: rotated file already exists")
+        # This return is above the orientation prompt below, so it is also the only
+        # notice that the prompt will not appear. Say how to get it back, or someone
+        # who flipped wrong the first time never finds out why they are not asked.
+        print(f"Plane {functional_plane}: already oriented, skipping "
+              f"(to change the flip, delete {save_filename_rotated.name})")
         return
 
     any_rotated_exists = any(save_path_registered.glob('*_rotated.tiff'))
