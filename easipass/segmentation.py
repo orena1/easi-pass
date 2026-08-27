@@ -62,6 +62,55 @@ def _apply_neuropil_pooling(pooling_method: str, values: np.ndarray) -> np.ndarr
     else:
         raise ValueError(f"Unsupported pooling method: {pooling_method}")
 
+# Cellpose is the only stage that can use a GPU; everything else in the pipeline
+# is CPU-only. Cellpose itself falls back to the CPU when no accelerator is
+# present, but it does so quietly -- and a run that was going to take twenty
+# minutes then takes hours with nothing said. _resolve_gpu makes that visible,
+# once. Keyed on the outcome, not on a bare flag, so the FISH and functional
+# blocks each announce themselves when they resolve differently.
+_gpu_notices_printed = set()
+
+
+def _accelerator_name():
+    """Name the accelerator cellpose will actually use, or None for CPU."""
+    try:
+        import torch
+    except ImportError:      # cellpose cannot import without torch, so this is unreachable
+        return None          # in practice; treat it as "no accelerator" rather than crash.
+    try:
+        if torch.cuda.is_available():
+            return f"CUDA ({torch.cuda.get_device_name(0)})"
+    except Exception:        # a broken/partial CUDA install raises rather than returning False
+        pass
+    mps = getattr(torch.backends, 'mps', None)
+    if mps is not None and mps.is_available():
+        return "Apple MPS"
+    return None
+
+
+def _resolve_gpu(cellpose_params: dict, context: str) -> bool:
+    """Decide whether this cellpose call runs on a GPU, and say so once.
+
+    `gpu` is optional in the manifest and defaults to True, meaning "use an
+    accelerator if there is one". It is not a requirement: absent CUDA (or MPS),
+    segmentation runs on the CPU and every other stage is unaffected. `gpu: false`
+    forces the CPU even where an accelerator exists.
+    """
+    requested = cellpose_params.get('gpu', True)
+    accelerator = _accelerator_name() if requested else None
+    if (requested, accelerator) not in _gpu_notices_printed:
+        _gpu_notices_printed.add((requested, accelerator))
+        if accelerator:
+            rprint(f"[dim]Cellpose ({context}) on {accelerator}[/dim]")
+        elif requested:
+            rprint("[yellow]No GPU available — running Cellpose on the CPU.[/yellow] "
+                   "[dim]Correct, but hours rather than minutes on full volumes. "
+                   "Set gpu: false in the manifest to silence this.[/dim]")
+        else:
+            rprint("[dim]Cellpose on the CPU (gpu: false)[/dim]")
+    return bool(accelerator)
+
+
 def _get_cached_cellpose_model(model_path: str, gpu: bool):
     """Get or create a cached Cellpose model instance.
 
@@ -249,7 +298,7 @@ class CellposeModelWrapper:
             # Use cached model (optimization: reuse across pipeline)
             self.model = _get_cached_cellpose_model(
                 self.params['HCR_cellpose']['model_path'],
-                self.params['HCR_cellpose']['gpu']
+                _resolve_gpu(self.params['HCR_cellpose'], 'FISH volumes')
             )
 
         kw = _eval_kwargs(self.params['HCR_cellpose'], is_3d_stack=True)
@@ -363,7 +412,7 @@ def run_cellpose_2p(tiff_path: Path, output_path: Path, cellpose_params: dict):
     # Use cached model (optimization: reuse across planes)
     model = _get_cached_cellpose_model(
         cellpose_params['model_path'],
-        cellpose_params['gpu']
+        _resolve_gpu(cellpose_params, 'functional planes')
     )
 
     masks, flows, styles = model.eval(

@@ -89,6 +89,24 @@ def accept_suite2p_masks(full_manifest: dict, session: dict):
     ops = np.load(s2p_plane / 'ops.npy', allow_pickle=True).item()
     Ly, Lx = int(ops['Ly']), int(ops['Lx'])
 
+    # The ROIs are painted on the Suite2p frame, but everything downstream registers
+    # the mean image written during prep. With `input_format: tiff` those are only the
+    # same picture if the user exported the TIFF from this same ops['meanImg'] -- a
+    # cropped or resampled export lines up nowhere, and nothing later would say so.
+    mean_path = cellpose_path / f'lowres_meanImg_C0_plane{plane}.tiff'
+    if mean_path.exists():
+        from tifffile import imread as _tif_imread
+        mean_shape = _tif_imread(mean_path).shape
+        if mean_shape != (Ly, Lx):
+            raise ValueError(
+                f"masks: suite2p — the Suite2p ROIs for plane {plane} are on a "
+                f"{Ly}x{Lx} frame, but the mean image being registered is "
+                f"{mean_shape[0]}x{mean_shape[1]}. The ROIs would land in the wrong "
+                "place, so nothing was written.\n"
+                f"  ROIs: {s2p_plane}\n  mean: {mean_path}\n"
+                "  Export the mean image from the same Suite2p ops['meanImg'] the ROIs "
+                "were drawn on, uncropped and unresampled.")
+
     mask_img = np.zeros((Ly, Lx), dtype=np.uint16)
     best_lam = np.zeros((Ly, Lx), dtype=np.float32)
     n_cells = 0

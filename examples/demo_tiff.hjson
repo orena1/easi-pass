@@ -72,6 +72,9 @@
         }
 
         // "cpsam" is cellpose-SAM, downloaded on first run. Or give a path to your own model.
+        // gpu: true means "use an accelerator if there is one" -- it is not a requirement.
+        // Without a GPU this still runs, just slower; set false to pin it to the CPU.
+        // Already have masks? See "Bringing your own masks" in the README to skip cellpose.
         HCR_cellpose: {
             model_path: "cpsam"
             cellpose_channel: 0

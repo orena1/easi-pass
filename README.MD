@@ -24,22 +24,84 @@ Everything else is set in a manifest.
 
 ## Installation
 
-Needs Linux, [conda](https://docs.conda.io/), and an NVIDIA GPU. The demo will run on CPU,
-but full datasets are impractically slow without one. Segmentation uses Cellpose 4
-(cellpose-SAM).
+Needs Linux. A GPU is optional — see below. Segmentation uses Cellpose 4 (cellpose-SAM).
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+
+```bash
+git clone https://github.com/orena1/easi-pass.git
+cd easi-pass
+
+uv venv --python 3.12
+source .venv/bin/activate
+
+uv pip install -r requirements-lock.txt        # NVIDIA GPU
+# uv pip install -r requirements-lock-cpu.txt  # no GPU (skips ~2.5 GB of CUDA)
+uv pip install -e . --no-deps
+```
+
+About four minutes, and uv fetches its own Python, so nothing else has to be installed
+first. The lock files pin every version exactly: nothing is resolved on your machine, and
+you get the environment the pipeline was validated in rather than whatever released this
+week. For the notebooks use `requirements-lock-all.txt`, which adds Jupyter and the analysis
+packages.
+
+Clone to local disk, not a network share — the editable install writes alongside the package
+and fails on some mounts.
+
+<details>
+<summary>If you have to use conda</summary>
+
+conda works, but it is slower for reasons that have nothing to do with this project: it
+downloads and indexes the whole of conda-forge's package metadata, several hundred megabytes,
+before installing anything, and it does that however little you ask it for. On the classic
+solver that step alone can take longer than the entire uv install. Use
+[miniforge](https://github.com/conda-forge/miniforge) and check `conda config --show solver`
+reports `libmamba`.
+
+`environment.yml` supplies Python and nothing else; the lock files do the rest.
 
 ```bash
 conda env create -f environment.yml
 conda activate easipass
-pip install -e .
+pip install -r requirements-lock.txt
+pip install -e . --no-deps
 ```
-
-`environment.yml` carries only what has to come from conda channels (Python and CUDA-enabled
-PyTorch). Everything else is a pip dependency, and `pip install -e .` covers every stage and
-mode. Optional extras: `.[notebooks]` for Jupyter, `.[analysis]` for the analysis notebooks.
+</details>
 
 Cross-modal runs also need [Fiji](https://fiji.sc/)'s BigWarp for placing landmarks
 (Plugins > BigDataViewer > Big Warp). See [docs/landmarks.md](docs/landmarks.md).
+
+### Do you need a GPU?
+
+No. Only Cellpose segmentation can use one. Registration, matching, intensity extraction and
+the merged tables are CPU-only, so a GPU changes how long you wait for masks and nothing else
+— same code, same numbers.
+
+Without one, install `requirements-lock-cpu.txt` and run exactly as documented. Cellpose falls
+back to the CPU on its own, and EASI-PASS prints one line at the start of segmentation naming
+the device it got, so a fallback you did not intend is visible rather than silent. As an order
+of magnitude: a full FISH volume that segments in tens of minutes on a GPU takes several hours
+on a CPU. The demo is one plane and one volume, and is comfortable either way.
+
+If you meant to use a GPU, confirm it is actually there before a long run:
+
+```bash
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+It should print a `+cu` version and `True`. A CPU-only build reports `False` and keeps
+working, just far slower — which is easy to mistake for the pipeline being slow.
+
+`gpu` in each cellpose block is optional and defaults to true, meaning *use an accelerator if
+there is one*. Set `gpu: false` to pin it to the CPU.
+
+If you already have masks, you can skip segmentation altogether — see
+[Bringing your own masks](#bringing-your-own-masks).
+
+RAM is the tighter constraint, and it scales with FISH volume size rather than with the GPU.
+Budget roughly 25 GB while a 2048 × 2048 × 100 round is being registered; a 64 GB machine is
+comfortable at that size.
 
 ## Start with the demo
 
@@ -67,8 +129,10 @@ three times to let you check intermediate output, and `demo/README.md` gives the
 | [`demo_hcr_only.hjson`](examples/demo_hcr_only.hjson) | FISH rounds alone, no functional data |
 
 A hi-res image and the single-round case both work with no manifest change; see the notes at
-the top of `demo_tiff.hjson`. [`param_example.hjson`](examples/param_example.hjson) documents
-every tunable option, but it has no `data` section so it is a reference, not a starting point.
+the top of `demo_tiff.hjson`. Either template runs as it stands once the paths are yours.
+[`param_example.hjson`](examples/param_example.hjson) annotates the registration and matching
+parameters in more depth than the templates do; it has no `data` section, so read it alongside
+a template rather than starting from it.
 
 **2. Put your files where the manifest expects them.**
 
@@ -118,11 +182,46 @@ writes the per-cell match tables and QA overlays, and stops, so the later rounds
 be imaged yet. Review the overlays in `OUTPUT/2P/registered/QualityCheck/`, then re-run without
 the flag to finish. Everything the check produced is reused.
 
+### Bringing your own masks
+
+Segmentation is a stage, not a prerequisite. If you have already segmented one side — your own
+Cellpose run, hand-corrected masks, Suite2p ROIs, another tool entirely — hand those in and
+EASI-PASS registers and matches them instead of segmenting again.
+
+**Suite2p ROIs, on the functional side.** Set `masks: "suite2p"` on the session, and the
+pipeline reads `2P/suite2p/plane{N}/` (`stat.npy`, `iscell.npy`, `ops.npy`) from your sample
+folder and rasterizes every `iscell` ROI into the label image Cellpose would have produced.
+Overlapping pixels go to the ROI with the higher `lam`, so each pixel has one owner. **Mask
+label = Suite2p ROI index + 1**, which is how you join your own `F.npy` back on: `label - 1`.
+Traces are yours to keep; EASI-PASS never reads them. This assumes the ROIs are in the
+`ops['meanImg']` pixel grid, which is true of a plain Suite2p run.
+
+**Anything else, by writing the file the stage would have written.** The pipeline skips a step
+whose output already exists, so a mask file in the right place is simply used.
+
+| Masks you have | Write them to | As |
+|---|---|---|
+| Functional plane `N` | `OUTPUT/2P/cellpose/lowres_meanImg_C0_plane{N}_seg.npy` | `np.save` of a dict with a `masks` key: a 2D label image on the mean image's pixel grid. (Cellpose also stores `img` for its GUI; the pipeline reads only `masks`) |
+| FISH round `R`, as acquired | `OUTPUT/HCR/cellpose/HCR{R}_masks.tiff` for the reference round, `HCR{R}_to_HCR{ref}_masks.tiff` for every other | 3D `uint16` label volume, matching the round's DAPI channel in `(Z, Y, X)` |
+| FISH round `R`, already warped into the reference frame | `OUTPUT/HCR/cellpose_aligned/` under the same names | as above, on the reference round's grid |
+
+The two FISH rows are separate skips, and each stands alone. Masks in `cellpose/` skip
+segmentation for that round; masks in `cellpose_aligned/` skip warping its labels into the
+reference frame, which is the one to use when your rounds are already registered to each
+other. Round-to-round registration is computed before that warp and still runs either way. For
+a single-round run there is nothing to warp — the reference round's masks are copied straight
+across — so `cellpose/` alone is enough.
+
+Label 0 is background, and the ceiling is 65,535 cells per volume — the pipeline raises rather
+than let `uint16` labels wrap. Number cells consecutively from 1, as Cellpose does. Write the
+file before the run reaches that stage, and delete it to segment again.
+
 ## What it does
 
 ```
 Before any segmentation
-  1. Per-plane prep              Rotate the functional mean image (and stitch it, for sbx)
+  1. Per-plane prep              Rotate the functional mean image (and, for ScanBox input,
+                                 stitch it)
   2. Landmarks                   BigWarp, functional plane against the acquired reference
                                  EASI-FISH volume. These come first so a bad alignment shows
                                  up before you spend an hour on Cellpose.
@@ -277,8 +376,9 @@ sections: `data` for what you are processing, `params` for how.
 Per round: `round` (e.g. `"01"`), `channels` (the nuclear stain used for registration comes
 first), `resolution` (voxel size `[x, y, z]` in microns, from your confocal metadata).
 
-Per session: `functional_planes` (the first is the reference plane for landmark alignment)
-and `input_format`.
+Per session: `functional_planes` (the first is the reference plane for landmark alignment),
+`input_format`, and optionally `masks` to reuse Suite2p ROIs instead of segmenting
+(see [Bringing your own masks](#bringing-your-own-masks)).
 
 **`params`**
 
@@ -290,8 +390,9 @@ and `input_format`.
 | `intensity_extraction` | Background settings for probe intensity measurement |
 | `rotation_2p_to_HCR` | Coarse rotation/flip bringing the functional image into FISH orientation |
 
-[`param_example.hjson`](examples/param_example.hjson) documents every option with its default
-and when to change it.
+Every `params` section has working defaults in the templates.
+[`param_example.hjson`](examples/param_example.hjson) goes deeper on the registration and
+matching knobs: what each one does, and when it is worth changing.
 
 ### Functional input formats
 
@@ -305,6 +406,13 @@ Two other readers exist for the acquisition setup this was built on, `suite2p` (
 image from an existing Suite2p `ops.npy`) and `sbx` (ScanBox). Both still work, but neither is
 the supported route: whatever produced your recording, export a mean image per plane as TIFF
 and the rest of the pipeline is identical.
+
+`input_format` and `masks` are separate choices and do not have to agree. `input_format` says
+where the image comes from; `masks` says where the cells come from. `input_format: "tiff"`
+with `masks: "suite2p"` is a normal combination — your own TIFF mean image, your own Suite2p
+ROIs, and no segmentation run at all. The one thing to get right is that the two describe the
+same pixel grid: export the TIFF from the same Suite2p `ops['meanImg']` the ROIs were drawn
+on, uncropped and unresampled.
 
 ### Hi-res structural images
 
@@ -353,7 +461,7 @@ never touches, so nothing is missing.
 
 **`could not start: No module named 'registrations'`** An internal module name, so never the
 real cause. The startup message names what is actually wrong; usually the environment is not
-active (`conda activate easipass`).
+active (`source .venv/bin/activate`).
 
 **Alignment looks wrong** See [docs/landmarks.md](docs/landmarks.md), which covers the common
 failure modes and what each one points to.

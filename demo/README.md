@@ -40,7 +40,9 @@ fetched by `fetch_demo_data.py`.
 - The pipeline environment with **Cellpose 4 / cellpose-SAM** (the demo manifest uses
   `model_path: "cpsam"`, which auto-downloads, so there are no model files to place). See the repo
   README's install section for the conda env.
-- A GPU is recommended (`gpu: true` in the manifest); set `gpu: false` to run on CPU (slower).
+- No GPU needed. The demo is one plane and one volume, which segment in reasonable time on a
+  CPU. If there is a GPU, Cellpose uses it; the manifest's `gpu: true` means "if there is one",
+  and `gpu: false` pins it to the CPU.
 
 ## Run it
 
