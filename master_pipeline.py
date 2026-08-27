@@ -56,14 +56,15 @@ except ImportError as exc:
             "Nothing is installed in this environment, so this is almost certainly the",
             "wrong one. Active environment: %s" % _env,
             "",
-            "    conda env list          # the active environment is marked with *",
-            "    conda activate easipass",
+            "    source .venv/bin/activate      # or wherever you created it",
+            "    conda env list                 # if you used conda; active is marked *",
             "",
             "If you have not installed EASI-PASS yet, from the repository root:",
             "",
-            "    conda env create -f environment.yml",
-            "    conda activate easipass",
-            "    pip install -e .",
+            "    uv venv --python 3.12",
+            "    source .venv/bin/activate",
+            "    uv pip install -r requirements-lock.txt",
+            "    uv pip install -e . --no-deps",
         ]
     elif _missing:
         _lines += [
@@ -72,7 +73,7 @@ except ImportError as exc:
             "",
             "Reinstall them with, from the repository root:",
             "",
-            "    pip install -e .",
+            "    uv pip install -r requirements-lock.txt",
         ]
     elif _real:
         # Everything on the list is present, but an internal module still failed to import. The

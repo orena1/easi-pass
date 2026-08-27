@@ -2291,11 +2291,16 @@ def print_match_summary(full_manifest: dict, all_planes: list):
             rprint(f"  [yellow]Plane {plane}: merged table not found[/yellow]")
             continue
 
+        # `denom` is display text, so that it can read "?" when the seg file is
+        # absent. The percentages need the number itself, and have nothing to
+        # divide by when there is none -- so keep both, rather than dividing by
+        # the string.
         if seg_path.exists():
             stats = np.load(seg_path, allow_pickle=True).item()
             total_2p = int(len(np.unique(stats['masks'])) - 1)
             denom = str(total_2p)
         else:
+            total_2p = None
             denom = "?"
 
         df = pd.read_pickle(merged_files[0])
@@ -2313,12 +2318,15 @@ def print_match_summary(full_manifest: dict, all_planes: list):
         n_soma = int(soma_matched.sum()) if soma_matched is not None else 0
         n_iou = int(df['twoP_iou_match'].notna().sum()) if 'twoP_iou_match' in df.columns else 0
 
+        def rate(n):
+            return f"{100 * n / total_2p:.0f}%" if total_2p else "?"
+
         # Name both matchers and both rates. Reporting one count against the total
         # invited it to be read as "the" match rate, when the two matchers are
         # independent and disagree by a few percent by design.
         line = (f"  Plane {plane} of {denom} 2P cells -> HCR{ref}:  "
-                f"IoU {n_iou} ({100 * n_iou / denom:.0f}%)  ·  "
-                f"soma-print {n_soma} ({100 * n_soma / denom:.0f}%)")
+                f"IoU {n_iou} ({rate(n_iou)})  ·  "
+                f"soma-print {n_soma} ({rate(n_soma)})")
         if soma_matched is not None:
             for r in register_rounds:
                 # The column the round's gene values were joined on: the hybrid's pick,

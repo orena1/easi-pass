@@ -26,8 +26,8 @@ jobs:
     # and the lock files silently go on pinning the old resolution.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
 
       - name: Regenerate all three locks
         # SNAPSHOT is the date the environment was last built and validated end
@@ -53,34 +53,49 @@ jobs:
       - name: Fail if they differ from what is committed
         run: |
           if ! git diff --exit-code -- requirements-lock*.txt; then
-            echo "::error::Lock files are out of date. Run the two uv pip compile"
+            echo "::error::Lock files are out of date. Run the three uv pip compile"
             echo "::error::commands above and commit the result."
             exit 1
           fi
 
+      - name: GPU and CPU locks agree outside of torch
+        # The install job below exercises only the CPU lock, which is sound just
+        # so long as the two differ in nothing but torch and its CUDA wheels.
+        # That is an assumption, so check it rather than trust it.
+        run: |
+          strip() {
+            grep -E '^[a-z0-9]' "$1" \
+              | grep -vE '^(torch|torchvision|triton|nvidia-)' | sort
+          }
+          if ! diff <(strip requirements-lock.txt) <(strip requirements-lock-cpu.txt); then
+            echo "::error::The GPU and CPU locks disagree on a package unrelated to"
+            echo "::error::torch. Testing only the CPU lock no longer covers the GPU"
+            echo "::error::one, so either reconcile them or test both."
+            exit 1
+          fi
+
   install-from-lock:
-    # The actual user experience, on a machine with nothing on it. CPU-only, so
-    # this exercises the lock and the imports rather than the GPU path.
+    # The actual user experience, on a machine with nothing on it.
+    #
+    # This installs the CPU lock rather than the GPU one, for two reasons: the
+    # runner has no GPU, so the ~2.7 GB of CUDA wheels in the GPU lock would be
+    # downloaded and never executed; and the CPU lock is the one nobody
+    # exercises by hand, since day-to-day work happens on GPU machines. The GPU
+    # lock differs from it only in torch, torchvision and the nvidia/triton
+    # wheels -- every other pin is identical, and the job above proves that.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-
-      - name: Reclaim disk
-        # The CUDA wheels bundled into the Linux torch build are large enough
-        # that the runner's preinstalled toolchains need to go first.
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
 
       - name: Install from the lock, then the package itself
         run: |
           python -m pip install --upgrade pip
-          time pip install -r requirements-lock.txt
+          time pip install -r requirements-lock-cpu.txt
           pip install -e . --no-deps
 
       - name: pip's own consistency check
