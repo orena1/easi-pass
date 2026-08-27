@@ -96,7 +96,7 @@ dependencies = [
     # easipass/registrations.py import these at module scope; the remaining
     # entries are transitive deps the pinned fork does not declare itself.
     "bigstream @ git+https://github.com/orena1/bigstream.git@b35f4eabbfaf0d96fd66023a07a5106c173b368c",
-    "ClusterWrap @ git+https://github.com/GFleishman/ClusterWrap.git@fa718ac49",
+    "ClusterWrap @ git+https://github.com/GFleishman/ClusterWrap.git@fa718ac49e55f813e913af043d107ecb32663cbb",
     "fishspot>=0.3",
     "morphsnakes>=2.0",
     "pynrrd>=1.0",

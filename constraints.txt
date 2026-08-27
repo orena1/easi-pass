@@ -12,15 +12,20 @@
 torch==2.5.1
 
 # ---------------------------------------------------------------------------
-# Snapshot date: 2026-07-15
+# Snapshot: 2026-07-16T00:00:00Z, i.e. everything published through 2026-07-15.
 #
-# requirements.txt is generated with `--exclude-newer 2026-07-15`, which
-# resolves as if it were that date. This is deliberate, and it is the other half
-# of the pin.
+# requirements.txt is generated with `--exclude-newer 2026-07-16T00:00:00Z`,
+# which resolves as if it were that instant. This is deliberate, and it is the
+# other half of the pin.
+#
+# It is a UTC timestamp and not a bare date because uv reads a bare date in the
+# local timezone. `--exclude-newer 2026-07-15` therefore means a different cutoff
+# on a UTC runner than on a laptop several hours west of it, and the two produce
+# different lock files from identical commands.
 #
 # Exact versions alone would only mean everyone gets the same environment; they
 # would not mean it is one the pipeline has run in, because a file regenerated
-# today picks up whatever released this morning. 2026-07-15 is the date the
+# today picks up whatever released this morning. It is the instant the
 # canonical environment was last built and validated, so resolving at it
 # reconstructs the environment the published results came from.
 #

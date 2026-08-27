@@ -31,10 +31,14 @@ jobs:
       - uses: astral-sh/setup-uv@v7
 
       - name: Regenerate requirements.txt
-        # SNAPSHOT is the date the environment was last built and validated end
-        # to end; see the note in constraints.txt before changing it.
+        # SNAPSHOT is the instant the environment was last built and validated
+        # end to end; see the note in constraints.txt before changing it. It is a
+        # UTC timestamp and not a bare date on purpose: uv reads a bare date in
+        # the LOCAL timezone, so the same command resolves differently on a
+        # runner (UTC) and on a laptop west of it, and the difference shows up as
+        # this job failing on a file someone generated correctly.
         env:
-          SNAPSHOT: '2026-07-15'
+          SNAPSHOT: '2026-07-16T00:00:00Z'
         run: |
           uv pip compile pyproject.toml \
             --python-platform x86_64-unknown-linux-gnu --python-version 3.12 \
@@ -45,7 +49,9 @@ jobs:
         run: |
           if ! git diff --exit-code -- requirements.txt; then
             echo "::error::requirements.txt is out of date. Run the uv pip compile"
-            echo "::error::command above and commit the result."
+            echo "::error::command above and commit the result. Regenerate to a"
+            echo "::error::fresh path: uv treats an existing output file as"
+            echo "::error::preferences and will keep pins that are already in it."
             exit 1
           fi
 
