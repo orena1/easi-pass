@@ -155,18 +155,21 @@ def prompt_registration_checkpoint(qa_paths, auto_landmarks_path, step_name, pla
     rprint(f"[bold green]Plane {plane_idx}: Auto-{step_name} Complete[/bold green]")
     rprint(f"[bold cyan]{'='*60}[/bold cyan]\n")
 
-    rprint("[bold]>>> STEP 1: Check the QA images in ImageJ/Fiji <<<[/bold]")
+    rprint("[bold]Check these overlays in ImageJ/Fiji:[/bold]")
     for i, path in enumerate(qa_paths):
-        label = "BEFORE" if i == 0 else "AFTER"
+        label = "before" if i == 0 else " after"
         rprint(f"  {label}: [blue]{path}[/blue]")
 
-    rprint(f"\n[bold]>>> STEP 2: Refined landmarks saved to <<<[/bold]")
+    # Named for what it holds: the placed landmarks with the rigid whole-plane shift
+    # added to the target side, and nothing after it. "Refined" left readers assuming
+    # the affine and the tile cascade were baked in as well.
+    rprint("\n[bold]Landmarks auto-adjusted by the rigid shift saved as:[/bold]")
     rprint(f"  [yellow]{auto_landmarks_path}[/yellow]")
 
-    rprint("\n[bold]After checking QA images, choose:[/bold]")
-    rprint("  \\[[green]y[/green]] Accept - continue with auto results")
-    rprint("  \\[[yellow]r[/yellow]] Refine - edit landmarks_auto.csv in BigWarp, then re-run")
-    rprint("  \\[[red]n[/red]] Skip - skip this plane, continue with others\n")
+    rprint("\n[bold]Then choose:[/bold]")
+    rprint("  \\[[green]y[/green]] accept these results")
+    rprint("  \\[[yellow]r[/yellow]] edit that file in BigWarp, then re-run")
+    rprint("  \\[[red]n[/red]] skip this plane\n")
 
     flush_input()   # don't let Enters tapped during the auto-registration answer this
     choice = Prompt.ask("Accept, refine, or skip?", choices=["y", "r", "n"], default="y")
@@ -174,7 +177,7 @@ def prompt_registration_checkpoint(qa_paths, auto_landmarks_path, step_name, pla
     if choice == "y":
         return "accept"
     elif choice == "r":
-        rprint(f"\n[yellow]Edit the landmarks file, save it, then press Enter:[/yellow]")
+        rprint(f"\n[yellow]Edit and save, then press Enter:[/yellow]")
         rprint(f"  {auto_landmarks_path}")
         pause("Press Enter when ready...")
         return "refine"
