@@ -1,5 +1,5 @@
-# EASI-PASS — conda environment. The fallback route; the README's uv route is
-# the recommended one and needs no conda.
+# EASI-PASS - conda environment. One of the two routes the README documents; the
+# other uses uv and needs no conda. Both give the same pinned environment.
 #
 # This file supplies Python and nothing else. Every dependency, PyTorch
 # included, is pinned in requirements.txt.

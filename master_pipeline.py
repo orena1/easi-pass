@@ -62,14 +62,14 @@ except ImportError as exc:
             "    source .venv/bin/activate      # or wherever you created it",
             "    conda env list                 # if you used conda; active is marked *",
             "",
-            "If you have not installed EASI-PASS yet, from the repository root:",
+            "If you have not installed EASI-PASS yet, from the repository root,",
+            "whichever of these you already have:",
             "",
-            "    uv venv --python 3.12",
-            "    source .venv/bin/activate",
+            "    conda env create -f environment.yml && conda activate easipass",
+            "    pip install -e . -c requirements.txt",
+            "",
+            "    uv venv --python 3.12 && source .venv/bin/activate",
             "    uv pip install -e . -c requirements.txt",
-            "",
-            "uv fetches its own Python 3.12, so it does not matter what this machine has.",
-            "Install it with: curl -LsSf https://astral.sh/uv/install.sh | sh",
         ]
     elif _missing:
         _lines += [

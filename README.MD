@@ -24,21 +24,31 @@ Everything else is set in a manifest.
 
 ## Installation
 
-Four commands, and the only thing you need beforehand is
-[uv](https://docs.astral.sh/uv/):
+Pick whichever line you already live on. Both give the identical pinned environment.
+
+**Already use conda?** Three commands. `environment.yml` supplies only Python, so conda is not
+solving the scientific stack and this is quick:
 
 ```bash
 git clone https://github.com/orena1/easi-pass.git
 cd easi-pass
-uv venv --python 3.12
+conda env create -f environment.yml && conda activate easipass
+pip install -e . -c requirements.txt
+```
+
+**Otherwise, [uv](https://docs.astral.sh/uv/)**, which fetches its own Python 3.12 so it does
+not matter what the machine has:
+
+```bash
+git clone https://github.com/orena1/easi-pass.git
+cd easi-pass
+uv venv --python 3.12 && source .venv/bin/activate
 uv pip install -e . -c requirements.txt
 ```
 
-About four minutes. Then activate it, and do that in any new shell:
-
-```bash
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-```
+Either way, about four minutes, and you reactivate the environment in each new shell
+(`conda activate easipass`, or `source .venv/bin/activate`; on Windows
+`.venv\Scripts\activate`).
 
 <details>
 <summary>Installing uv, if you do not have it</summary>
@@ -51,60 +61,39 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"      # Windows
 Then open a new shell, or `export PATH="$HOME/.local/bin:$PATH"`.
 </details>
 
-uv **fetches its own Python 3.12**, which is the reason it is the documented route. The
-pipeline needs 3.12, most machines ship something older, and installing into an older one
-fails with errors that point nowhere near the real cause.
-
-The four commands are identical on Linux, macOS and Windows, and give the same pinned
-versions on each. Development and testing happen on Linux, so that is where the pipeline is
-known to run end to end; the CUDA libraries are Linux-only, so a GPU only helps there.
-
-`requirements.txt` holds the exact versions the pipeline was validated with, and `-c` applies
-them, so you get that environment and not whatever released this week. Keep the `-c` on
-any later install into the same environment, for the same reason.
-
-For the notebooks and analysis extras:
-
-```bash
-uv pip install -e ".[notebooks,analysis]" -c requirements.txt
-```
-
-Clone to local disk, not a network share: the editable install writes alongside the package
-and fails on some mounts.
-
 <details>
-<summary>If you already have Python 3.12 and would rather not install uv</summary>
+<summary>Or plain venv, if you already have Python 3.12</summary>
 
 Check the version first, because the failure otherwise is obscure:
 
 ```bash
 python3 -V        # must be 3.12 or newer
-```
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e . -c requirements.txt
 ```
 
 If `python3 -m venv` itself fails, your distribution splits it into a separate package
-(`sudo apt install python3-venv` on Debian and Ubuntu). uv needs none of this.
+(`sudo apt install python3-venv` on Debian and Ubuntu).
 </details>
 
-<details>
-<summary>If you have to use conda</summary>
+The pipeline needs Python 3.12 and most systems ship something older, which is the one thing
+worth getting right: installing into an older Python fails with errors that point nowhere near
+the real cause. conda and uv both sidestep it by supplying 3.12 themselves.
 
-conda indexes the whole of conda-forge before installing anything, which on the classic
-solver takes longer than the entire uv install. Use
-[miniforge](https://github.com/conda-forge/miniforge) and check `conda config --show solver`
-reports `libmamba`. `environment.yml` supplies Python; `requirements.txt` does the rest.
+`requirements.txt` holds the exact versions the pipeline was validated with, and `-c` applies
+them, so you get that environment and not whatever released this week. Keep the `-c` on any
+later install into the same environment, for the same reason:
 
 ```bash
-conda env create -f environment.yml
-conda activate easipass
-pip install -e . -c requirements.txt
+pip install -e ".[notebooks,analysis]" -c requirements.txt      # notebooks and analysis
 ```
-</details>
+
+The commands are the same on Linux, macOS and Windows and give the same pinned versions on
+each. Development and testing happen on Linux, so that is where the pipeline is known to run
+end to end; the CUDA libraries are Linux-only, so a GPU only helps there.
+
+Clone to local disk, not a network share: the editable install writes alongside the package
+and fails on some mounts.
 
 Cross-modal runs also need [Fiji](https://fiji.sc/)'s BigWarp for placing landmarks
 (Plugins > BigDataViewer > Big Warp). See [docs/landmarks.md](docs/landmarks.md).
