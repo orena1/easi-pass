@@ -179,6 +179,41 @@ Three warnings appear on every run and none of them mean anything is wrong: `pyn
 installed` from Suite2p, `FutureWarning: You are using torch.load with weights_only=False`
 from Cellpose loading its own model, and a `SyntaxWarning` from inside SimpleITK.
 
+### Looking at what came out
+
+A finished run leaves you with a table and no obvious place to start.
+[`demo/explore_results.ipynb`](demo/explore_results.ipynb) opens it, shows how it is put
+together, and plots what is worth checking first. Run it after the demo to confirm your output
+looks like it should, then point it at your own runs.
+
+```bash
+jupyter lab demo/explore_results.ipynb
+```
+
+It walks through seven short steps:
+
+| | |
+|---|---|
+| The main table | What each row and column is |
+| The two matchers | How many cells each found, and how often they agree |
+| Adding positions | Joining centroids on, since the main table has none |
+| Did it work | Every functional cell coloured by whether it matched, and where the plane landed |
+| Every probe | One small map per probe, each on its own scale |
+| A few matches up close | Three matched pairs as overlaid masks, green functional and magenta EASI-FISH |
+
+The masks-up-close step is the one that tells you a match is real rather than merely counted.
+Everything else reads only the small tables and takes seconds; that step reads a full mask
+volume, so give it about ten seconds.
+
+The same plots without Jupyter, saved as one figure next to your results:
+
+```bash
+python demo/explore_results.py                       # the demo run
+python demo/explore_results.py --output PATH/OUTPUT   # your own run
+```
+
+Both work on any finished `OUTPUT` folder, not just the demo.
+
 The first command pulls 191 MB from this repo's
 [releases page](https://github.com/orena1/easi-pass/releases) and checks its sha256; allow
 about 1.3 GB of disk for the images and what the run writes. Nothing to edit. The run pauses
