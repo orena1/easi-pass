@@ -504,6 +504,9 @@ clean run.
 **`pynwb not installed ...`** Printed by Suite2p on every import. NWB is a format EASI-PASS
 never touches, so nothing is missing.
 
+**`SyntaxWarning: invalid escape sequence` from SimpleITK** Printed once on import, from a
+docstring inside SimpleITK itself. Nothing to do with this pipeline and nothing to fix here.
+
 **`could not start: No module named 'registrations'`** An internal module name, so never the
 real cause. The startup message names what is actually wrong; usually the environment is not
 active (`source .venv/bin/activate`).
