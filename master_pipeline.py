@@ -63,7 +63,7 @@ except ImportError as exc:
             "",
             "    uv venv --python 3.12",
             "    source .venv/bin/activate",
-            "    uv pip install -r requirements-lock.txt",
+            "    uv pip install -r requirements.txt",
             "    uv pip install -e . --no-deps",
         ]
     elif _missing:
@@ -73,7 +73,7 @@ except ImportError as exc:
             "",
             "Reinstall them with, from the repository root:",
             "",
-            "    uv pip install -r requirements-lock.txt",
+            "    uv pip install -r requirements.txt",
         ]
     elif _real:
         # Everything on the list is present, but an internal module still failed to import. The
@@ -90,7 +90,7 @@ except ImportError as exc:
             "If that names a third-party package, install it and add it to _REQUIRED in",
             "master_pipeline.py so the next person gets told directly:",
             "",
-            "    pip install -e .",
+            "    uv pip install -r requirements.txt",
         ]
     else:
         _lines += [

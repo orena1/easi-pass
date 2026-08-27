@@ -1,48 +1,17 @@
-# EASI-PASS — conda environment (the fallback route, not the recommended one)
+# EASI-PASS — conda environment. The fallback route; the README's uv route is
+# the recommended one and needs no conda.
 #
-# This file exists to supply one thing: Python 3.12. Every dependency, PyTorch
-# included, is a pip dependency declared in pyproject.toml and pinned exactly in
-# requirements-lock.txt.
-#
-# Prefer the uv route in the README. It needs no conda, fetches its own Python,
-# and installs the same locked versions in a couple of minutes:
-#
-#   uv venv --python 3.12 && source .venv/bin/activate
-#   uv pip install -r requirements-lock.txt
-#   uv pip install -e . --no-deps
-#
-# Use this file only if you are required to work inside conda.
+# This file supplies Python and nothing else. Every dependency, PyTorch
+# included, is pinned in requirements.txt.
 #
 #   conda env create -f environment.yml
 #   conda activate easipass
-#   pip install -r requirements-lock.txt
+#   pip install -r requirements.txt
 #   pip install -e . --no-deps
 #
-# ---------------------------------------------------------------------------
-# Why this file is so small, and why it is still not fast
-#
-# It used to pull PyTorch, torchvision and pytorch-cuda from the `pytorch` and
-# `nvidia` channels. That was worth removing on its own:
-#
-#   * The `pytorch` channel is frozen. Its newest build is pytorch 2.5.1 and
-#     there will not be another, because PyTorch stopped publishing to conda.
-#   * It was redundant. The Linux PyTorch wheels on PyPI bundle CUDA, so pip
-#     gives you a GPU build with no conda involvement.
-#   * Torch was therefore installed twice: once here, and again as a transitive
-#     dependency of cellpose and suite2p on the pip side.
-#
-# What that did NOT fix is the wait at `Collecting package metadata`. conda
-# downloads and parses the whole of conda-forge's repodata — over 600 MB of
-# JSON — before it will install even a single package, and asking for less does
-# not make it fetch less. On conda's classic solver that step, not the solve,
-# is most of the install. Trimming this file shortened the solve; only leaving
-# conda out entirely removes the metadata fetch.
-#
-# So: if conda is slow here, that is conda, and the uv route above is the fix.
-# If you must stay on conda, use miniforge and make sure the libmamba solver is
-# active (`conda config --show solver`), which at least fetches the compressed
-# repodata and solves in a fraction of the time.
-# ---------------------------------------------------------------------------
+# If `Collecting package metadata` takes a long time, that is conda indexing all
+# of conda-forge and is not specific to this project. Use miniforge and check
+# `conda config --show solver` reports libmamba, or use uv instead.
 
 name: easipass
 

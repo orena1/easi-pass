@@ -35,16 +35,23 @@ cd easi-pass
 uv venv --python 3.12
 source .venv/bin/activate
 
-uv pip install -r requirements-lock.txt        # NVIDIA GPU
-# uv pip install -r requirements-lock-cpu.txt  # no GPU (skips ~2.5 GB of CUDA)
+uv pip install -r requirements.txt
 uv pip install -e . --no-deps
 ```
 
 About four minutes, and uv fetches its own Python, so nothing else has to be installed
-first. The lock files pin every version exactly: nothing is resolved on your machine, and
-you get the environment the pipeline was validated in rather than whatever released this
-week. For the notebooks use `requirements-lock-all.txt`, which adds Jupyter and the analysis
-packages.
+first. One file, whether or not you have a GPU. `requirements.txt` pins every version
+exactly, so nothing is resolved on your machine and you get the environment the pipeline was
+validated in rather than whatever released this week.
+
+For the notebooks, add the extras on top:
+
+```bash
+uv pip install -e ".[notebooks,analysis]" -c requirements.txt
+```
+
+Keep the `-c`. Without it, Jupyter's own dependencies pull newer numpy and pandas than the
+pinned ones and quietly undo the versions above.
 
 Clone to local disk, not a network share — the editable install writes alongside the package
 and fails on some mounts.
@@ -59,12 +66,12 @@ solver that step alone can take longer than the entire uv install. Use
 [miniforge](https://github.com/conda-forge/miniforge) and check `conda config --show solver`
 reports `libmamba`.
 
-`environment.yml` supplies Python and nothing else; the lock files do the rest.
+`environment.yml` supplies Python and nothing else; `requirements.txt` does the rest.
 
 ```bash
 conda env create -f environment.yml
 conda activate easipass
-pip install -r requirements-lock.txt
+pip install -r requirements.txt
 pip install -e . --no-deps
 ```
 </details>
@@ -78,11 +85,13 @@ No. Only Cellpose segmentation can use one. Registration, matching, intensity ex
 the merged tables are CPU-only, so a GPU changes how long you wait for masks and nothing else
 — same code, same numbers.
 
-Without one, install `requirements-lock-cpu.txt` and run exactly as documented. Cellpose falls
-back to the CPU on its own, and EASI-PASS prints one line at the start of segmentation naming
-the device it got, so a fallback you did not intend is visible rather than silent. As an order
-of magnitude: a full FISH volume that segments in tens of minutes on a GPU takes several hours
-on a CPU. The demo is one plane and one volume, and is comfortable either way.
+Without one, install exactly as above and run exactly as documented — there is no separate
+CPU install. Cellpose falls back to the CPU on its own, and EASI-PASS prints one line at the
+start of segmentation naming the device it got, so a fallback you did not intend is visible
+rather than silent. The only cost of the single install is disk: the Linux PyTorch wheels
+bundle CUDA whether or not you can use it, about 3 GB that then sits idle. As an order of
+magnitude for time: a full FISH volume that segments in tens of minutes on a GPU takes several
+hours on a CPU. The demo is one plane and one volume, and is comfortable either way.
 
 If you meant to use a GPU, confirm it is actually there before a long run:
 
@@ -90,8 +99,8 @@ If you meant to use a GPU, confirm it is actually there before a long run:
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-It should print a `+cu` version and `True`. A CPU-only build reports `False` and keeps
-working, just far slower — which is easy to mistake for the pipeline being slow.
+It should print `True`. A machine that reports `False` keeps working, just far slower — which
+is easy to mistake for the pipeline being slow.
 
 `gpu` in each cellpose block is optional and defaults to true, meaning *use an accelerator if
 there is one*. Set `gpu: false` to pin it to the CPU.

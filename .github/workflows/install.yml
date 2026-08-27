@@ -1,9 +1,9 @@
 name: install
 
 # Installation is the first thing a new lab does and the easiest thing to break
-# without noticing, because it breaks for them and not for us. Two checks: the
-# lock files still follow from pyproject.toml, and a clean machine can install
-# from them and import the package.
+# without noticing, because it breaks for them and not for us. Two checks:
+# requirements.txt still follows from pyproject.toml, and a machine with nothing
+# on it can install from it and import the package.
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
     paths:
       - pyproject.toml
       - constraints.txt
-      - requirements-lock*.txt
+      - requirements.txt
       - environment.yml
       - .github/workflows/install.yml
   schedule:
@@ -21,68 +21,36 @@ on:
     - cron: '0 6 * * 1'
 
 jobs:
-  locks-match-pyproject:
-    # Cheap, and catches the failure mode where someone edits a version range
-    # and the lock files silently go on pinning the old resolution.
+  requirements-match-pyproject:
+    # Cheap, and catches the failure mode where someone edits a version range in
+    # pyproject.toml and requirements.txt silently goes on pinning the old
+    # resolution.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
 
-      - name: Regenerate all three locks
+      - name: Regenerate requirements.txt
         # SNAPSHOT is the date the environment was last built and validated end
-        # to end; see the note in constraints.txt before changing it. It has to
-        # match in all three commands or the locks disagree with each other.
+        # to end; see the note in constraints.txt before changing it.
         env:
           SNAPSHOT: '2026-07-15'
         run: |
           uv pip compile pyproject.toml \
             --python-platform x86_64-unknown-linux-gnu --python-version 3.12 \
             --constraints constraints.txt --exclude-newer "$SNAPSHOT" \
-            --output-file requirements-lock.txt
-          uv pip compile pyproject.toml --all-extras \
-            --python-platform x86_64-unknown-linux-gnu --python-version 3.12 \
-            --constraints constraints.txt --exclude-newer "$SNAPSHOT" \
-            --output-file requirements-lock-all.txt
-          uv pip compile pyproject.toml \
-            --python-platform x86_64-unknown-linux-gnu --python-version 3.12 \
-            --constraints constraints.txt --torch-backend=cpu \
-            --exclude-newer "$SNAPSHOT" \
-            --output-file requirements-lock-cpu.txt
+            --output-file requirements.txt
 
-      - name: Fail if they differ from what is committed
+      - name: Fail if it differs from what is committed
         run: |
-          if ! git diff --exit-code -- requirements-lock*.txt; then
-            echo "::error::Lock files are out of date. Run the three uv pip compile"
-            echo "::error::commands above and commit the result."
+          if ! git diff --exit-code -- requirements.txt; then
+            echo "::error::requirements.txt is out of date. Run the uv pip compile"
+            echo "::error::command above and commit the result."
             exit 1
           fi
 
-      - name: GPU and CPU locks agree outside of torch
-        # The install job below exercises only the CPU lock, which is sound just
-        # so long as the two differ in nothing but torch and its CUDA wheels.
-        # That is an assumption, so check it rather than trust it.
-        run: |
-          strip() {
-            grep -E '^[a-z0-9]' "$1" \
-              | grep -vE '^(torch|torchvision|triton|nvidia-)' | sort
-          }
-          if ! diff <(strip requirements-lock.txt) <(strip requirements-lock-cpu.txt); then
-            echo "::error::The GPU and CPU locks disagree on a package unrelated to"
-            echo "::error::torch. Testing only the CPU lock no longer covers the GPU"
-            echo "::error::one, so either reconcile them or test both."
-            exit 1
-          fi
-
-  install-from-lock:
+  install:
     # The actual user experience, on a machine with nothing on it.
-    #
-    # This installs the CPU lock rather than the GPU one, for two reasons: the
-    # runner has no GPU, so the ~2.7 GB of CUDA wheels in the GPU lock would be
-    # downloaded and never executed; and the CPU lock is the one nobody
-    # exercises by hand, since day-to-day work happens on GPU machines. The GPU
-    # lock differs from it only in torch, torchvision and the nvidia/triton
-    # wheels -- every other pin is identical, and the job above proves that.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -92,15 +60,23 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install from the lock, then the package itself
+      - name: Reclaim disk
+        # The Linux torch wheels bundle CUDA, which is most of a 3 GB download,
+        # so the runner's preinstalled toolchains have to go first.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - name: Install
         run: |
           python -m pip install --upgrade pip
-          time pip install -r requirements-lock-cpu.txt
+          time pip install -r requirements.txt
           pip install -e . --no-deps
 
       - name: pip's own consistency check
-        # Catches a lock that installs but leaves conflicting requirements —
-        # the two opencv distributions disagreeing on a major, for instance.
+        # Catches an environment that installs but leaves conflicting
+        # requirements -- the two opencv distributions disagreeing on a major,
+        # for instance.
         run: pip check
 
       - name: Import every pipeline module
@@ -108,7 +84,7 @@ jobs:
         # master_pipeline defers its imports into main(), so neither one would
         # touch a dependency. Importing the modules by name is what actually
         # proves the install. Each one pulls its own third-party stack at module
-        # scope — torch, cellpose, suite2p, bigstream, SimpleITK, cv2.
+        # scope -- torch, cellpose, suite2p, bigstream, SimpleITK, cv2.
         run: |
           python - <<'PY'
           import importlib
