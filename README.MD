@@ -11,11 +11,11 @@ rounds alone.
 It does not process raw recordings, compute ΔF/F, or stitch image tiles. Those happen
 upstream, and EASI-PASS takes their output as input.
 
-**Getting started** — [What it needs](#what-it-needs) · [Ways to run this](#ways-to-run-this) · [Installation](#installation) · [Start with the demo](#start-with-the-demo) · [Running your own data](#running-your-own-data)
+**Getting started:** [What it needs](#what-it-needs) · [Ways to run this](#ways-to-run-this) · [Installation](#installation) · [Start with the demo](#start-with-the-demo) · [Running your own data](#running-your-own-data)
 
-**Using it** — [Bringing your own masks](#bringing-your-own-masks) · [What it does](#what-it-does) · [What you get](#what-you-get) · [The feature table](#the-feature-table) · [Manifest](#manifest)
+**Using it:** [Bringing your own masks](#bringing-your-own-masks) · [What it does](#what-it-does) · [What you get](#what-you-get) · [The feature table](#the-feature-table) · [Manifest](#manifest)
 
-**Reference** — [What the pipeline writes](#what-the-pipeline-writes) · [Re-running](#re-running) · [Source layout](#source-layout) · [Citation](#citation)
+**Reference:** [What the pipeline writes](#what-the-pipeline-writes) · [Re-running](#re-running) · [Source layout](#source-layout) · [Citation](#citation)
 
 ## What it needs
 
@@ -43,7 +43,7 @@ This is the demo and the main case. Template: [`demo_tiff.hjson`](examples/demo_
 **Functional + FISH, with a hi-res bridge.** The same, plus an already-stitched structural
 image per plane. The functional mean image is often too coarse to landmark against a FISH
 volume directly; the hi-res image bridges the two. Drop it next to the mean image as
-`plane_{N}_hires.tiff` — no manifest change, its presence is the switch.
+`plane_{N}_hires.tiff`. No manifest change; its presence is the switch.
 
 **FISH only.** One or more FISH rounds and no functional data, registered and matched to each
 other. No landmarks, no functional segmentation. Omit the `two_photon_imaging` section
@@ -53,7 +53,7 @@ Template: [`demo_hcr_only.hjson`](examples/demo_hcr_only.hjson).
 **A single FISH round.** Nothing to register it against, so round-to-round registration is
 skipped on its own. Leave one entry in `rounds`; nothing else changes.
 
-**Masks already segmented.** You have masks for one or both sides — your own Cellpose run,
+**Masks already segmented.** You have masks for one or both sides: your own Cellpose run,
 hand-corrected masks, Suite2p ROIs, another tool entirely. Put them where the stage would have
 written them and that stage skips. See [Bringing your own masks](#bringing-your-own-masks).
 
@@ -266,7 +266,7 @@ the same name, as is Cellpose's own `_seg.npy` if you hand-corrected in its GUI.
 
 Two rules, both checked before anything runs:
 
-- Masks must be the **same shape as the image they describe** — the functional mean image, or
+- Masks must be the **same shape as the image they describe**: the functional mean image, or
   the FISH volume as acquired, indexed `(Z, Y, X)`. Uncropped, unresampled.
 - At most **65,535 cells** per image.
 
@@ -293,7 +293,7 @@ are named `HCR{R}_to_HCR{ref}_masks.tiff`, so round 02 against reference 01 is
 | Step | |
 |---|---|
 | **1. Orient the functional image** | Settle any mirror flip between the functional image and the FISH volume. On a first run the pipeline prints both file paths and waits: open them, and if one is mirrored, add `fliplr` or `flipud` to `rotation_2p_to_HCR` in your manifest before continuing. ScanBox input is stitched at this step too. |
-| **2. Place landmarks** | A handful of points in BigWarp, functional plane against the reference FISH volume. This comes before Cellpose on purpose, so a bad alignment surfaces in minutes rather than after an hour of segmentation. |
+| **2. Place landmarks** | A handful of points in BigWarp, functional plane against the reference FISH volume. This comes before Cellpose on purpose, so a bad alignment surfaces in minutes, not after an hour of segmentation. |
 
 **Segmentation**
 
@@ -302,14 +302,14 @@ are named `HCR{R}_to_HCR{ref}_masks.tiff`, so round 02 against reference 01 is
 | **3. Functional** | Cellpose on each mean image |
 | **4. Molecular** | Cellpose per FISH plane, linked across planes into 3D cells |
 
-**Molecular side** — once, covering all rounds
+**Molecular side**, once, covering all rounds
 
 | Step | |
 |---|---|
 | **5. Round-to-round registration** | Each round onto the reference round. Cell centroids initialize a global affine (RANSAC), then a block-wise deformable refinement (BigStream). Labels are warped into the reference frame. |
 | **6. Probe intensity extraction** | Per-cell fluorescence per channel, with local background |
 
-**Cross-modal** — per plane
+**Cross-modal**, per plane
 
 | Step | |
 |---|---|
@@ -327,7 +327,7 @@ FISH-only runs skip steps 1, 2, 3, 7 and 8. At step 9 they match rounds to each 
 of to a functional plane.
 
 **A flip is not the same as a rotation.** Only the flip has to be right at step 1, because
-BigWarp cannot mirror an image — get it wrong and nothing downstream can recover. Rotation is
+BigWarp cannot mirror an image, and nothing downstream can recover from getting it wrong. Rotation is
 absorbed by the landmarks you place at step 2, so you do not need to set it. If your manifest
 already carries `rotation_2p_to_HCR` the pipeline applies it and does not ask.
 
@@ -339,7 +339,7 @@ segmentation first: every centroid comes from it.
 hope. It runs the whole global alignment once per entry in `context_radius_um` (by default 40,
 60 and 80 µm), scores each, and writes every candidate's transform and QC image to disk before
 you choose. The scores disagree often enough that the pipeline marks a suggestion and leaves
-the decision to you, so look at the images rather than the numbers alone.
+the decision to you, so look at the images and not the numbers alone.
 
 If it still registers poorly, the knobs in `HCR_to_HCR_registration` are: lower
 `match_threshold` (0.3 to 0.2) to accept weaker correspondences, lower `count_floor` /
@@ -384,12 +384,12 @@ functional cell is it, and which cell is it in each later round.
 | `plane` | `0` | The functional plane this file covers |
 | **Its genes** | | |
 | `{feature}_round_{R}_{gene}` | `mean_round_01_SST` → `0.0` | One column per channel per round |
-| **Which functional cell it is** — two independent matchers, which can disagree | | |
+| **Which functional cell it is.** Two independent matchers, which can disagree | | |
 | `twoP_iou_match` | `412` | The cell matched by mask overlap |
 | `twoP_iou` | `0.51` | How good that overlap was |
 | `twoP_somaprint_match` | `412` | The cell soma-print picked |
 | `twoP_somaprint_confident` | `True` | Whether that pick cleared its gate. Always `True`/`False`, never blank |
-| **Which cell it is in each later round `R`** — absent for single-round runs | | |
+| **Which cell it is in each later round `R`.** Absent for single-round runs | | |
 | `round_{R}_iou_match` | `310` | The cell by overlap alone |
 | `round_{R}_iou` | `0.44` | That overlap |
 | `round_{R}_hybrid_match` | `310` | The cell by the full matcher. **The gene columns are joined on this one** |
@@ -454,7 +454,7 @@ Per session: `functional_planes` (the first is the reference plane for landmark 
 | `HCR_cellpose`, `2p_cellpose` | Cellpose model and parameters for each side |
 | `twop_to_hcr_registration` | Cross-modal cascade: tile sizes, search ranges, thresholds |
 | `intensity_extraction` | Background settings for probe intensity measurement |
-| `rotation_2p_to_HCR` | `fliplr` / `flipud` to un-mirror the functional image, plus an optional coarse `rotation`. The flip is the part that has to be right — see [step 1](#what-it-does) |
+| `rotation_2p_to_HCR` | `fliplr` / `flipud` to un-mirror the functional image, plus an optional coarse `rotation`. The flip is the part that has to be right; see [step 1](#what-it-does) |
 
 Every `params` section has working defaults in the templates.
 [`param_example.hjson`](examples/param_example.hjson) goes deeper on the registration and
@@ -524,7 +524,7 @@ Three steps behave differently, and it is worth knowing which:
 
 | Step | Behaviour |
 |---|---|
-| Low-res to hi-res placement, and the cross-modal cascade | **Ask** rather than skip. You get `Overwrite? [y/n]` naming the file, and your answer is reused for every remaining plane. Answer `n` to keep what is there |
+| Low-res to hi-res placement, and the cross-modal cascade | **Ask**, do not skip. You get `Overwrite? [y/n]` naming the file, and your answer is reused for every remaining plane. Answer `n` to keep what is there |
 | Segmentation | Looks for your own masks before its own output, so deleting `_seg.npy` alone finds the `_masks.tiff` beside it and reuses that. Delete both to segment again |
 | Merged feature tables | Rebuild when any intensity file is newer than the table, so they refresh on their own |
 
