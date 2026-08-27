@@ -507,6 +507,10 @@ never touches, so nothing is missing.
 **`SyntaxWarning: invalid escape sequence` from SimpleITK** Printed once on import, from a
 docstring inside SimpleITK itself. Nothing to do with this pipeline and nothing to fix here.
 
+**`FutureWarning: You are using torch.load with weights_only=False`** Printed by Cellpose
+when it loads its own model. The wording is generic PyTorch advice about untrusted files; the
+file here is the Cellpose model you asked for. Cellpose's to fix, not this pipeline's.
+
 **`could not start: No module named 'registrations'`** An internal module name, so never the
 real cause. The startup message names what is actually wrong; usually the environment is not
 active (`source .venv/bin/activate`).
