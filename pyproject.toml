@@ -67,6 +67,14 @@ dependencies = [
     # Visualization (used in core pipeline for QC outputs)
     "matplotlib>=3.9",
 
+    # JupyterLab, so `jupyter lab demo/explore_results.ipynb` works from the
+    # install the README documents. The whole Jupyter stack is ~30 MB against
+    # torch's ~3 GB CUDA wheel, so it is not what makes this install large, and
+    # leaving it out meant the demo told people to run a command they did not
+    # have. The heavier notebook extras (seaborn, plotly, widgets) stay optional.
+    "jupyterlab>=4.3",
+    "ipykernel",
+
     # Config & I/O
     "hjson",
     "pyyaml",
@@ -120,10 +128,10 @@ Issues = "https://github.com/orena1/easi-pass/issues"
 
 [project.optional-dependencies]
 
-# Interactive notebooks (HCR-HCR registration, analysis, figures)
+# Extras for the in-repo analysis and figure notebooks. JupyterLab itself is a
+# core dependency; these are the plotting and widget libraries those notebooks
+# import on top of it.
 notebooks = [
-    "jupyterlab>=4.3",
-    "ipykernel",
     "ipympl>=0.9",
     "ipywidgets>=8.1",
     "seaborn>=0.13",
