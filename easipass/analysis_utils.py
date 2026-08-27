@@ -53,16 +53,34 @@ except ImportError:
 # UTILITIES
 # =============================================================================
 
-def get_col(df, col_name):
-    """Get column name handling both flat and MultiIndex DataFrames.
+# Columns that have been renamed in the merged feature table. Tables written before the
+# rename still open, so every lookup tries the current name first and then the old one.
+COLUMN_ALIASES = {
+    'twoP_iou_match': ('twoP_mask',),
+    'twoP_somaprint_match': ('twoP_somaprint_mask',),
+}
 
-    For MultiIndex columns, finds the first column containing col_name.
-    For flat columns, returns col_name unchanged.
+
+def get_col(df, col_name):
+    """Resolve a column name against a table, across layouts and across renames.
+
+    Handles the flat single-header layout the pipeline writes now, the two-level MultiIndex
+    tables written before it, and columns that have since been renamed. Returns the name as it
+    appears in THIS table, or col_name unchanged when nothing matches, so callers can still
+    raise their own error.
     """
+    candidates = (col_name, *COLUMN_ALIASES.get(col_name, ()))
+    # MultiIndex first: `name in df.columns` matches level 0 there and would hand back a bare
+    # string, which indexes to a sub-frame and not a Series. Callers need the full tuple.
     if isinstance(df.columns, pd.MultiIndex):
-        for col in df.columns:
-            if col_name in str(col):
-                return col
+        for name in candidates:
+            for col in df.columns:
+                if name in str(col):
+                    return col
+        return col_name
+    for name in candidates:
+        if name in df.columns:
+            return name
     return col_name
 
 
@@ -757,18 +775,19 @@ def deduplicate_2p_matches(df: pd.DataFrame) -> pd.DataFrame:
     """
     Keep only the best HCR-to-2P match per 2P cell.
 
-    When multiple HCR cells match the same 2P cell (twoP_mask column),
+    When multiple HCR cells match the same 2P cell (twoP_iou_match column),
     keep the one with the highest IoU (twoP_iou).
 
     Args:
-        df: DataFrame with 'twoP_mask' and an IoU column
+        df: DataFrame with 'twoP_iou_match' and an IoU column
 
     Returns:
         Deduplicated DataFrame
     """
     # Check required columns exist
-    if 'twoP_mask' not in df.columns:
-        rprint("[yellow]Warning: 'twoP_mask' column not found, skipping deduplication[/yellow]")
+    match_col = get_col(df, 'twoP_iou_match')
+    if match_col not in df.columns:
+        rprint("[yellow]Warning: 'twoP_iou_match' column not found, skipping deduplication[/yellow]")
         return df
 
     try:
@@ -778,7 +797,7 @@ def deduplicate_2p_matches(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     # Filter to only cells with 2P matches
-    has_2p = df['twoP_mask'].notna()
+    has_2p = df[match_col].notna()
     df_with_2p = df[has_2p].copy()
     df_without_2p = df[~has_2p].copy()
 
@@ -788,8 +807,8 @@ def deduplicate_2p_matches(df: pd.DataFrame) -> pd.DataFrame:
         rprint("[yellow]No cells with 2P matches found[/yellow]")
         return df
 
-    # Group by twoP_mask and keep best match
-    deduplicated = df_with_2p.groupby('twoP_mask', group_keys=False).apply(
+    # Group by the matched 2P cell and keep best match
+    deduplicated = df_with_2p.groupby(match_col, group_keys=False).apply(
         select_best_match
     ).reset_index(drop=True)
 
@@ -838,7 +857,7 @@ def smart_merge_planes(
     plane_dfs: Dict[int, pd.DataFrame],
     reference_plane: int,
     mask_id_col: str = 'mask_id_main',
-    twop_mask_col: str = 'twoP_mask',
+    twop_mask_col: str = 'twoP_iou_match',
     twop_iou_col: str = None,
     hcr_coords: pd.DataFrame = None
 ) -> pd.DataFrame:
@@ -1015,14 +1034,19 @@ def filter_artifacts(
     Uses centroid Y position from 2P masks.
 
     Args:
-        df: DataFrame with 'plane' and 'twoP_mask' columns
+        df: DataFrame with 'plane' and 'twoP_iou_match' columns
         plane_data: Dict from load_2p_spatial_data
         y_threshold: Minimum Y position (pixels)
 
     Returns:
         Filtered DataFrame
     """
-    if 'plane' not in df.columns or 'twoP_mask' not in df.columns:
+    # Both resolved through get_col: on a two-level table `row['plane']` returns a Series,
+    # not a scalar, and the `plane not in plane_data` test below then raises on an
+    # unhashable Series.
+    match_col = get_col(df, 'twoP_iou_match')
+    plane_col = get_col(df, 'plane')
+    if plane_col not in df.columns or match_col not in df.columns:
         rprint("[yellow]Warning: Required columns not found, skipping artifact filter[/yellow]")
         return df
 
@@ -1032,8 +1056,8 @@ def filter_artifacts(
     keep_mask = np.ones(len(df), dtype=bool)
 
     for idx, row in df.iterrows():
-        plane = row['plane']
-        twop_mask = row['twoP_mask']
+        plane = row[plane_col]
+        twop_mask = row[match_col]
 
         if pd.isna(twop_mask) or plane not in plane_data:
             continue
@@ -1360,7 +1384,7 @@ def apply_spatial_selection_to_dataframe(
     plane_data: Dict[int, dict],
     include_hcr_only: bool = True,
     plane_col: str = 'best_plane',
-    twop_mask_col: str = 'twoP_mask'
+    twop_mask_col: str = 'twoP_iou_match'
 ) -> Tuple[pd.DataFrame, np.ndarray]:
     """
     Apply spatial selection masks to HCR merged DataFrame.
@@ -1378,7 +1402,7 @@ def apply_spatial_selection_to_dataframe(
         include_hcr_only: If True (default), keep cells without 2P match.
                          If False, exclude cells that don't have a 2P match.
         plane_col: Column name for plane ID (default: 'best_plane').
-        twop_mask_col: Column name for 2P mask ID (default: 'twoP_mask').
+        twop_mask_col: Column name for the matched 2P cell (default: 'twoP_iou_match').
 
     Returns:
         Tuple of:
@@ -1388,13 +1412,13 @@ def apply_spatial_selection_to_dataframe(
     Index Mapping (CRITICAL):
         For each row in merged_df:
         1. Get plane from row[plane_col]
-        2. Get twoP_mask from row[twop_mask_col] (e.g., 42.0)
+        2. Get twoP_iou_match from row[twop_mask_col] (e.g., 42.0)
         3. Convert to cell_id: f'cell_{int(twop_mask)}' -> 'cell_42'
         4. Find index in plane_data[plane]['cell_ids']
         5. Check spatial_masks[plane][index]
 
     Note:
-        - Rows with NaN twoP_mask (HCR-only cells) pass through if include_hcr_only=True
+        - Rows with NaN twoP_iou_match (HCR-only cells) pass through if include_hcr_only=True
         - Uses original DataFrame indices via .loc[] to preserve row identity
     """
     n_rows = len(merged_df)
@@ -1437,7 +1461,7 @@ def apply_spatial_selection_to_dataframe(
 
         plane = int(plane_val)
 
-        # Convert twoP_mask (42.0) to cell_id ('cell_42')
+        # Convert twoP_iou_match (42.0) to cell_id ('cell_42')
         cell_id = f'cell_{int(twop_mask_val)}'
         key = (plane, cell_id)
 
@@ -1520,12 +1544,8 @@ class SpatialSelector:
         if highlight_matched and merged_df is not None:
             colors = np.full(n_cells, 0.3)
 
-            if isinstance(merged_df.columns, pd.MultiIndex):
-                plane_col = ('best_plane', '') if ('best_plane', '') in merged_df.columns else 'best_plane'
-                mask_col = ('twoP_mask', '') if ('twoP_mask', '') in merged_df.columns else 'twoP_mask'
-            else:
-                plane_col = 'best_plane'
-                mask_col = 'twoP_mask'
+            plane_col = get_col(merged_df, 'best_plane')
+            mask_col = get_col(merged_df, 'twoP_iou_match')
 
             plane_rows = merged_df[merged_df[plane_col] == reference_plane]
             matched_masks = set(plane_rows[mask_col].dropna().astype(int))
@@ -2674,15 +2694,15 @@ def align_masks_to_hcr_table(
     """
     Align 2P-based response masks to HCR table indices.
 
-    Maps from 2P cell indices to HCR table rows using twoP_mask and plane columns.
-    The HCR table has one row per HCR cell, with twoP_mask indicating the matched
+    Maps from 2P cell indices to HCR table rows using twoP_iou_match and plane columns.
+    The HCR table has one row per HCR cell, with twoP_iou_match indicating the matched
     2P cell ID (or NaN if no match).
 
     Args:
         responses: Dict with combined excited_mask, inhibited_mask (concatenated across planes)
                    OR can be empty if all_responses is provided
         plane_data: Dict from load_2p_spatial_data (maps plane -> {cell_ids, ...})
-        hcr_df: DataFrame with 'twoP_mask' and 'best_plane' (or 'plane') columns
+        hcr_df: DataFrame with 'twoP_iou_match' and 'best_plane' (or 'plane') columns
         all_responses: Optional dict mapping plane -> response dict with per-plane masks.
                        If provided, uses this instead of combined responses for more
                        accurate per-plane indexing.
@@ -2698,13 +2718,13 @@ def align_masks_to_hcr_table(
     inhibited_aligned = np.zeros(n_rows, dtype=bool)
 
     # Find the actual column names
-    twop_mask_col = get_col(hcr_df, 'twoP_mask')
+    twop_mask_col = get_col(hcr_df, 'twoP_iou_match')
     plane_col = get_col(hcr_df, 'best_plane')
     if plane_col not in hcr_df.columns:
         plane_col = get_col(hcr_df, 'plane')
 
     if twop_mask_col not in hcr_df.columns:
-        rprint(f"[yellow]Warning: twoP_mask column not found, cannot align responses[/yellow]")
+        rprint(f"[yellow]Warning: twoP_iou_match column not found, cannot align responses[/yellow]")
         return {'excited_aligned': excited_aligned, 'inhibited_aligned': inhibited_aligned}
 
     if plane_col not in hcr_df.columns:
@@ -2754,9 +2774,9 @@ def align_masks_to_hcr_table(
 
             plane = int(plane)
 
-            # Convert twoP_mask to match plane_data cell_id format
+            # Convert twoP_iou_match to match plane_data cell_id format
             if uses_cell_prefix:
-                # twoP_mask is numeric (e.g., 486.0), convert to 'cell_486'
+                # twoP_iou_match is numeric (e.g., 486.0), convert to 'cell_486'
                 cell_id = f'cell_{int(twop_mask)}'
             else:
                 # Keep as-is or convert to int
@@ -2820,7 +2840,7 @@ def align_masks_to_hcr_table(
 
             plane = int(plane)
 
-            # Convert twoP_mask to match plane_data cell_id format
+            # Convert twoP_iou_match to match plane_data cell_id format
             if uses_cell_prefix:
                 cell_id = f'cell_{int(twop_mask)}'
             else:
@@ -4038,7 +4058,7 @@ def plot_spatial_match_summary(
     merged_df: pd.DataFrame,
     reference_plane: int,
     mask_id_col: str = 'mask_id_main',
-    twop_mask_col: str = 'twoP_mask',
+    twop_mask_col: str = 'twoP_iou_match',
     figsize: Tuple[int, int] = (12, 6)
 ) -> plt.Figure:
     """

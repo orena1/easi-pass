@@ -1,10 +1,10 @@
 """Download the JS078 demo imaging data from the GitHub release.
 
-The demo's small text files (manifest, seed landmarks, expected output) live in the
-git repo. The imaging volumes are attached to a GitHub release and fetched here so
-the repo stays lightweight. There are two archives:
+The demo's small text files (manifest, landmarks, expected output) live in the git
+repo. The imaging volumes are attached to a GitHub release and fetched here so the
+repo stays lightweight.
 
-One archive, demo_pre_run (~350 MB zipped): the dataset you run the pipeline on.
+One archive, demo_pre_run (191 MB zipped, 790 MB unpacked): the data you run on.
 To check your result afterwards, diff it against the golden table tracked in
 demo/completed/ -- see demo/completed/README.md for the numbers to expect.
 

@@ -62,6 +62,55 @@ def _apply_neuropil_pooling(pooling_method: str, values: np.ndarray) -> np.ndarr
     else:
         raise ValueError(f"Unsupported pooling method: {pooling_method}")
 
+# Cellpose is the only stage that can use a GPU; everything else in the pipeline
+# is CPU-only. Cellpose itself falls back to the CPU when no accelerator is
+# present, but it does so quietly -- and a run that was going to take twenty
+# minutes then takes hours with nothing said. _resolve_gpu makes that visible,
+# once. Keyed on the outcome, not on a bare flag, so the FISH and functional
+# blocks each announce themselves when they resolve differently.
+_gpu_notices_printed = set()
+
+
+def _accelerator_name():
+    """Name the accelerator cellpose will actually use, or None for CPU."""
+    try:
+        import torch
+    except ImportError:      # cellpose cannot import without torch, so this is unreachable
+        return None          # in practice; treat it as "no accelerator" rather than crash.
+    try:
+        if torch.cuda.is_available():
+            return f"CUDA ({torch.cuda.get_device_name(0)})"
+    except Exception:        # a broken/partial CUDA install raises rather than returning False
+        pass
+    mps = getattr(torch.backends, 'mps', None)
+    if mps is not None and mps.is_available():
+        return "Apple MPS"
+    return None
+
+
+def _resolve_gpu(cellpose_params: dict, context: str) -> bool:
+    """Decide whether this cellpose call runs on a GPU, and say so once.
+
+    `gpu` is optional in the manifest and defaults to True, meaning "use an
+    accelerator if there is one". It is not a requirement: absent CUDA (or MPS),
+    segmentation runs on the CPU and every other stage is unaffected. `gpu: false`
+    forces the CPU even where an accelerator exists.
+    """
+    requested = cellpose_params.get('gpu', True)
+    accelerator = _accelerator_name() if requested else None
+    if (requested, accelerator) not in _gpu_notices_printed:
+        _gpu_notices_printed.add((requested, accelerator))
+        if accelerator:
+            rprint(f"[dim]Cellpose ({context}) on {accelerator}[/dim]")
+        elif requested:
+            rprint("[yellow]No GPU available — running Cellpose on the CPU.[/yellow] "
+                   "[dim]Correct, but hours rather than minutes on full volumes. "
+                   "Set gpu: false in the manifest to silence this.[/dim]")
+        else:
+            rprint("[dim]Cellpose on the CPU (gpu: false)[/dim]")
+    return bool(accelerator)
+
+
 def _get_cached_cellpose_model(model_path: str, gpu: bool):
     """Get or create a cached Cellpose model instance.
 
@@ -249,7 +298,7 @@ class CellposeModelWrapper:
             # Use cached model (optimization: reuse across pipeline)
             self.model = _get_cached_cellpose_model(
                 self.params['HCR_cellpose']['model_path'],
-                self.params['HCR_cellpose']['gpu']
+                _resolve_gpu(self.params['HCR_cellpose'], 'FISH volumes')
             )
 
         kw = _eval_kwargs(self.params['HCR_cellpose'], is_3d_stack=True)
@@ -363,7 +412,7 @@ def run_cellpose_2p(tiff_path: Path, output_path: Path, cellpose_params: dict):
     # Use cached model (optimization: reuse across planes)
     model = _get_cached_cellpose_model(
         cellpose_params['model_path'],
-        cellpose_params['gpu']
+        _resolve_gpu(cellpose_params, 'functional planes')
     )
 
     masks, flows, styles = model.eval(
@@ -1933,7 +1982,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
           soma_map     {ref → mov}   the hybrid's pick: a strict-IoU anchor
                                      (own IoU and neighbourhood IoU both over their gates)
                                      or, failing that, a soma-print rescue
-          soma_extra   {matched_by / somaprint_score / somaprint_second_score → {ref → v}};
+          soma_extra   {hybrid_matched_by / somaprint_score / somaprint_second_score → {ref → v}};
                        empty when somaprint_hcr did not run, and then soma_map is empty too.
 
         Quality is reported per stage, because the two are not comparable: an anchor is
@@ -1973,7 +2022,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             'somaprint_score': dict(zip(soma_keys, soma['somaprint_best_score'].astype(float))),
             'somaprint_second_score': dict(zip(soma_keys,
                                                soma['somaprint_second_score'].astype(float))),
-            'matched_by': (dict(zip(soma_keys, soma['somaprint_source']))
+            'hybrid_matched_by': (dict(zip(soma_keys, soma['somaprint_source']))
                            if 'somaprint_source' in soma.columns
                            else {k: 'somaprint' for k in soma_map}),
         }
@@ -2099,40 +2148,27 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
         ####       ####
         ###  MATCH  ###
         ####       ####
-        # Column naming in the merged table. All size / IoU / containment
-        # values are plane-restricted (at-plane for 2P↔HCR; ≈full-multiplane
-        # for HCR↔HCR). Subject of `containment` is named first
-        # (X_containment = fraction of X inside its partner). Unprefixed
-        # twoP_* = IoU side; twoP_somaprint_* = soma side.
+        # Column naming in the merged table. Every match column names the matcher that
+        # produced it, and every metric belongs to a named pair.
         #
-        # 2P↔HCR (IoU best-match):
-        #   twoP_mask, twoP_iou, twoP_containment, HCR_containment,
-        #   twoP_mask_size
-        # 2P↔HCR (somaprint, geometric matcher):
-        #   twoP_somaprint_mask, twoP_somaprint_best_score,
-        #   twoP_somaprint_second_score, twoP_somaprint_mask_size
+        # 2P↔HCR:
+        #   twoP_iou_match, twoP_iou      the IoU best-match and that pair's overlap
+        #   twoP_somaprint_match          soma-print's pick, independent of IoU
+        #   twoP_somaprint_confident      whether that pick cleared its gate
         # HCR round-to-round, one set per non-reference round R:
-        #   round_{R}_iou_match, round_{R}_iou,
-        #   round_{R}_hybrid_match, round_{R}_matched_by,
+        #   round_{R}_iou_match, round_{R}_iou
+        #   round_{R}_hybrid_match, round_{R}_hybrid_matched_by
         #   round_{R}_somaprint_score, round_{R}_somaprint_second_score
         #
-        # Sizes and containments are deliberately NOT repeated here -- every one of them is
-        # already in MERGED/aligned_masks/{pair}.csv (mask1_size, mask2_size, intersection,
-        # both containments), and 3D cell sizes fall out of the published mask tiffs with
-        # one np.unique. This table's job is gene values attached to reference cells.
+        # Sizes, containments, intersections and the neighbourhood term are deliberately NOT
+        # here. Every one of them is already a column of MERGED/aligned_masks/{pair}.csv, the
+        # full per-pair record, and 3D cell sizes fall out of the published mask tiffs with one
+        # np.unique. This table's job is gene values attached to reference cells, plus enough
+        # to say which cell each value came from.
         #
         # See match_masks() and align_somaprint() docstrings for the
         # precise definition of each metric. `mask_id_main` always refers
         # to mask2 in the matching CSVs (the reference round = stack2).
-        TWOP_COL_RENAME = {
-            'iou_at_mask1_z':         'twoP_iou',
-            'containment_2p':         'twoP_containment',
-            'containment_hcr_at_z':   'HCR_containment',
-            'mask1_size':             'twoP_mask_size',
-            # Reported neighborhood-agreement term (2P→HCR only; None on legacy
-            # CSVs → column of None, schema-stable). User thresholds on this.
-            'neighborhood_iou':       'twoP_neighborhood_iou',
-        }
 
         def _lookup_column(mask_ids, dct):
             """Map an iterable of mask_id_main values through a dict (None if missing)."""
@@ -2140,28 +2176,18 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
 
         ref_mask_ids = reference_round_intensities_pivot.mask_id_main
 
-        # 2P columns — IoU best-match path
-        reference_round_intensities_pivot['twoP_mask'] = _lookup_column(ref_mask_ids, twoP_mapping_dict)
-        for src_col, dest_col in TWOP_COL_RENAME.items():
-            reference_round_intensities_pivot[dest_col] = _lookup_column(
-                ref_mask_ids, twoP_metrics_dict.get(src_col, {}))
-
-        # 2P columns — somaprint side (geometric matcher, independent of
-        # IoU). For each HCR cell, twoP_somaprint_mask is the 2P cell that
-        # somaprint picked here, confident or not (None if no somaprint
-        # match landed on this HCR cell). twoP_somaprint_confident exposes
-        # the confidence flag so downstream code can filter; scores are
-        # populated whether or not the pick was confident. twoP_mask and
-        # twoP_somaprint_mask can disagree; downstream consumers pick
-        # which matcher to filter on.
-        reference_round_intensities_pivot['twoP_somaprint_mask'] = _lookup_column(
+        # 2P columns. Two matchers, two answers, never blended -- the same shape as the round
+        # block below. twoP_iou_match and twoP_somaprint_match are both 2P cell ids and can disagree;
+        # downstream consumers pick which matcher to filter on.
+        #
+        # Sizes, containments and the neighbourhood term are NOT repeated here. Every one of
+        # them, and the soma scores behind twoP_somaprint_confident, is already a column of
+        # MERGED/aligned_masks/twop_plane{N}_to_HCR{ref}.csv, which is the full per-pair record.
+        reference_round_intensities_pivot['twoP_iou_match'] = _lookup_column(ref_mask_ids, twoP_mapping_dict)
+        reference_round_intensities_pivot['twoP_iou'] = _lookup_column(
+            ref_mask_ids, twoP_metrics_dict.get('iou_at_mask1_z', {}))
+        reference_round_intensities_pivot['twoP_somaprint_match'] = _lookup_column(
             ref_mask_ids, twoP_soma_mapping_dict)
-        reference_round_intensities_pivot['twoP_somaprint_best_score'] = _lookup_column(
-            ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_best_score', {}))
-        reference_round_intensities_pivot['twoP_somaprint_second_score'] = _lookup_column(
-            ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_second_score', {}))
-        reference_round_intensities_pivot['twoP_somaprint_mask_size'] = _lookup_column(
-            ref_mask_ids, twoP_soma_metrics_dict.get('somaprint_mask_size', {}))
         # A cell soma-print never picked is not confident, so this is False, not missing --
         # matching how somaprint_confident is stored on the matching CSVs. Left as None it
         # came back from csv as NaN in an object column, where `~col` silently misbehaves.
@@ -2171,7 +2197,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
 
         # HCR round columns. Two matchers, two answers, never blended:
         #   round_{R}_iou_match     who plain IoU picked      + round_{R}_iou, that pair's overlap
-        #   round_{R}_hybrid_match  who the hybrid picked     + round_{R}_matched_by, which stage
+        #   round_{R}_hybrid_match  who the hybrid picked  + round_{R}_hybrid_matched_by, the stage
         #                           ('overlap' = cleared the strict IoU + neighbourhood gates;
         #                            'somaprint' = rescued geometrically) and, for a rescue,
         #                           the soma scores it was judged on.
@@ -2190,7 +2216,7 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             if extra:
                 reference_round_intensities_pivot[f'round_{round_name}_hybrid_match'] = _lookup_column(
                     ref_mask_ids, soma_map)
-                for key in ('matched_by', 'somaprint_score', 'somaprint_second_score'):
+                for key in ('hybrid_matched_by', 'somaprint_score', 'somaprint_second_score'):
                     reference_round_intensities_pivot[f'round_{round_name}_{key}'] = _lookup_column(
                         ref_mask_ids, extra.get(key, {}))
                 round_join_cols.append(f'round_{round_name}_hybrid_match')
@@ -2265,34 +2291,42 @@ def print_match_summary(full_manifest: dict, all_planes: list):
             rprint(f"  [yellow]Plane {plane}: merged table not found[/yellow]")
             continue
 
+        # `denom` is display text, so that it can read "?" when the seg file is
+        # absent. The percentages need the number itself, and have nothing to
+        # divide by when there is none -- so keep both, rather than dividing by
+        # the string.
         if seg_path.exists():
             stats = np.load(seg_path, allow_pickle=True).item()
             total_2p = int(len(np.unique(stats['masks'])) - 1)
             denom = str(total_2p)
         else:
+            total_2p = None
             denom = "?"
 
         df = pd.read_pickle(merged_files[0])
-        # twoP_somaprint_mask is populated for confident AND non-confident
+        # twoP_somaprint_match is populated for confident AND non-confident
         # picks (so non-confident scores are still visible in the table);
         # the summary count is the confident subset, matching the historical
         # meaning of this line.
-        if 'twoP_somaprint_mask' in df.columns:
+        if 'twoP_somaprint_match' in df.columns:
             if 'twoP_somaprint_confident' in df.columns:
-                soma_matched = df['twoP_somaprint_mask'].notna() & df['twoP_somaprint_confident'].fillna(False).astype(bool)
+                soma_matched = df['twoP_somaprint_match'].notna() & df['twoP_somaprint_confident'].fillna(False).astype(bool)
             else:
-                soma_matched = df['twoP_somaprint_mask'].notna()
+                soma_matched = df['twoP_somaprint_match'].notna()
         else:
             soma_matched = None
         n_soma = int(soma_matched.sum()) if soma_matched is not None else 0
-        n_iou = int(df['twoP_mask'].notna().sum()) if 'twoP_mask' in df.columns else 0
+        n_iou = int(df['twoP_iou_match'].notna().sum()) if 'twoP_iou_match' in df.columns else 0
+
+        def rate(n):
+            return f"{100 * n / total_2p:.0f}%" if total_2p else "?"
 
         # Name both matchers and both rates. Reporting one count against the total
         # invited it to be read as "the" match rate, when the two matchers are
         # independent and disagree by a few percent by design.
         line = (f"  Plane {plane} of {denom} 2P cells -> HCR{ref}:  "
-                f"IoU {n_iou} ({100 * n_iou / denom:.0f}%)  ·  "
-                f"soma-print {n_soma} ({100 * n_soma / denom:.0f}%)")
+                f"IoU {n_iou} ({rate(n_iou)})  ·  "
+                f"soma-print {n_soma} ({rate(n_soma)})")
         if soma_matched is not None:
             for r in register_rounds:
                 # The column the round's gene values were joined on: the hybrid's pick,

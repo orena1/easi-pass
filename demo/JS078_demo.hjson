@@ -35,11 +35,11 @@
 
     params: {
         // Automated registration (no interactive BigWarp during the run).
-        // twop_to_hcr still uses the seed landmarks shipped at
+        // twop_to_hcr still uses the landmarks shipped at
         // OUTPUT/2P/registered/hires_stitched_plane0_to_HCR1_landmarks.csv
         automation: {
             lowres_to_hires: "auto"     // SIFT: align low-res 2P mean to the hi-res stitched image
-            twop_to_hcr: "auto"         // refine the seed landmarks + cascade
+            twop_to_hcr: "auto"         // refine the landmarks + cascade
         }
 
         // Coarse orientation of the 2P image relative to HCR (eyeballed once).

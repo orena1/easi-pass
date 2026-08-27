@@ -22,7 +22,7 @@ as `OUTPUT/MERGED/aligned_extracted_features/full_table_*.csv` and `.pkl`.)
 | HCR cells segmented (whole 3D volume, all 39 z-slices) | ~21,000 |
 | 2P cells segmented in the plane | 1,439 |
 | 2P cells matched 1:1 (IoU) | 1,199, or **83% of the 1,439 segmented** |
-| 2P cells soma-print called confidently | 1,149, or 80% |
+| 2P cells Soma-print called confidently | 1,149, or 80% |
 | best-match median IoU (at 2P z) | 0.29 |
 | 2P→HCR cascade final overlay IoU | ~0.48 |
 | global coarse shift found | dx ≈ −18 px, accepted (no `[WARN] Global rejected`) |

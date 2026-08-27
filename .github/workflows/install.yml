@@ -1,0 +1,108 @@
+name: install
+
+# Installation is the first thing a new lab does and the easiest thing to break
+# without noticing, because it breaks for them and not for us. Two checks:
+# requirements.txt still follows from pyproject.toml, and a machine with nothing
+# on it can install from it and import the package.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - pyproject.toml
+      - constraints.txt
+      - requirements.txt
+      - environment.yml
+      - .github/workflows/install.yml
+  schedule:
+    # Weekly, so that a dependency yanked or a git ref disappearing upstream
+    # surfaces here rather than in someone's first hour with the pipeline.
+    - cron: '0 6 * * 1'
+
+jobs:
+  requirements-match-pyproject:
+    # Cheap, and catches the failure mode where someone edits a version range in
+    # pyproject.toml and requirements.txt silently goes on pinning the old
+    # resolution.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Regenerate requirements.txt
+        # SNAPSHOT is the instant the environment was last built and validated
+        # end to end; see the note in constraints.txt before changing it. It is a
+        # UTC timestamp and not a bare date on purpose: uv reads a bare date in
+        # the LOCAL timezone, so the same command resolves differently on a
+        # runner (UTC) and on a laptop west of it, and the difference shows up as
+        # this job failing on a file someone generated correctly.
+        env:
+          SNAPSHOT: '2026-07-16T00:00:00Z'
+        run: |
+          uv pip compile pyproject.toml \
+            --python-platform x86_64-unknown-linux-gnu --python-version 3.12 \
+            --constraints constraints.txt --exclude-newer "$SNAPSHOT" \
+            --output-file requirements.txt
+
+      - name: Fail if it differs from what is committed
+        run: |
+          if ! git diff --exit-code -- requirements.txt; then
+            echo "::error::requirements.txt is out of date. Run the uv pip compile"
+            echo "::error::command above and commit the result. Regenerate to a"
+            echo "::error::fresh path: uv treats an existing output file as"
+            echo "::error::preferences and will keep pins that are already in it."
+            exit 1
+          fi
+
+  install:
+    # The actual user experience, on a machine with nothing on it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Reclaim disk
+        # The Linux torch wheels bundle CUDA, which is most of a 3 GB download,
+        # so the runner's preinstalled toolchains have to go first.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          time pip install -e . -c requirements.txt
+
+      - name: pip's own consistency check
+        # Catches an environment that installs but leaves conflicting
+        # requirements -- the two opencv distributions disagreeing on a major,
+        # for instance.
+        run: pip check
+
+      - name: Import every pipeline module
+        # Not `import easipass`: the package __init__ is a stub and
+        # master_pipeline defers its imports into main(), so neither one would
+        # touch a dependency. Importing the modules by name is what actually
+        # proves the install. Each one pulls its own third-party stack at module
+        # scope -- torch, cellpose, suite2p, bigstream, SimpleITK, cv2.
+        run: |
+          python - <<'PY'
+          import importlib
+          mods = """analysis_utils auto_stitching automation bigstream_functions
+                    functional hcr_centroid_registration importers meta registrations
+                    registrations_landmarks registrations_utils segmentation somaprint
+                    somaprint_hcr tiling""".split()
+          for m in mods:
+              importlib.import_module(f"easipass.{m}")
+              print(f"  ok  easipass.{m}")
+          import cv2, torch, zarr
+          print("cv2", cv2.__version__, "| torch", torch.__version__, "| zarr", zarr.__version__)
+          PY
+
+      - name: The CLI answers
+        run: python master_pipeline.py --help

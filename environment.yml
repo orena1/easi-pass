@@ -1,26 +1,22 @@
-# EASI-PASS — conda environment
+# EASI-PASS — conda environment. The fallback route; the README's uv route is
+# the recommended one and needs no conda.
 #
-# Only what has to come from conda channels: Python and CUDA-enabled PyTorch.
-# Everything else is a pip dependency declared in pyproject.toml.
+# This file supplies Python and nothing else. Every dependency, PyTorch
+# included, is pinned in requirements.txt.
 #
 #   conda env create -f environment.yml
 #   conda activate easipass
-#   pip install -e .
+#   pip install -e . -c requirements.txt
+#
+# If `Collecting package metadata` takes a long time, that is conda indexing all
+# of conda-forge and is not specific to this project. Use miniforge and check
+# `conda config --show solver` reports libmamba, or use uv instead.
 
 name: easipass
 
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
 
 dependencies:
   - python=3.12
-
-  # PyTorch with CUDA (not reliably pip-installable with GPU support)
-  - pytorch::pytorch=2.5
-  - pytorch::torchvision
-  - pytorch::pytorch-cuda=12.1
-
-  # pip (for installing the package itself)
   - pip

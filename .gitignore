@@ -4,6 +4,14 @@ __pycache__/
 **/.ipynb_checkpoints/
 *.ipynb
 
+# Build and virtualenv output. `pip install -e .` drops an egg-info tree next to
+# the package, and the lock files are meant to be installed into a venv here.
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
 # Personal/IDE settings
 .vscode/
 

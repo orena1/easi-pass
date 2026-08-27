@@ -71,11 +71,13 @@ twop_to_hcr_registration:{
 }
 
 // HCR round-to-round cell matching: a two-stage hybrid that re-pairs cells across
-// rounds and feeds round_{R}_mask in the merged table. Stage 1 = best-plane IoU
-// overlap (the well-registered bulk); stage 2 = pinned soma-print repair (recovers
-// partners in locally mis-registered patches that overlap alone misses). The merged
-// table gains round_{R}_match_source ('overlap'|'somaprint'|'iou') and the soma
-// score columns. Default ON; set enabled:false to fall back to pure IoU best-match.
+// rounds and fills round_{R}_hybrid_match in the merged table, which the gene columns
+// are joined on. Stage 1 = best-plane IoU overlap (the well-registered bulk); stage 2 =
+// pinned soma-print repair (recovers partners in locally mis-registered patches that
+// overlap alone misses). The merged table gains round_{R}_hybrid_matched_by
+// ('overlap'|'somaprint') and the soma score columns, alongside round_{R}_iou_match,
+// which is what overlap alone would have said.
+// Default ON; set enabled:false to fall back to pure IoU best-match.
 // Validated on JS082 HCR02->HCR01 (81.4% overlap -> 88.2% hybrid).
 somaprint_hcr:{
     "enabled":true

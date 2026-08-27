@@ -16,13 +16,13 @@ demo/
 ├── JS078_demo.hjson       ← the manifest; nothing to edit
 ├── make_demo_data.py      ← how the demo subset was assembled from full JS078 (reproducible)
 ├── fetch_demo_data.py     ← downloads the imaging data from the GitHub release
-├── demo_pre_run/          ← FRESH: the data you run the pipeline on (~350 MB download)
+├── demo_pre_run/          ← FRESH: the data you run the pipeline on (191 MB download)
 │   └── JS078_demo/
 │       ├── 2P/plane_0.tiff              (2P low-res mean image, ~1.6 MB)
 │       ├── 2P/plane_0_hires.tiff        (2P hi-res stitched image, ~49 MB)
 │       ├── HCR/JS078_demo_HCR01.tiff    (5-channel HCR volume, full frame, ~774 MB)
 │       └── OUTPUT/2P/registered/        (pre-seeded landmarks + placement, so the run reproduces)
-│           ├── hires_stitched_plane0_to_HCR1_landmarks.csv   (18 BigWarp seed landmarks)
+│           ├── hires_stitched_plane0_to_HCR1_landmarks.csv   (18 BigWarp landmarks)
 │           ├── lowres_plane0_masks_in_hires_space.tiff       (2P placement in hi-res space)
 │           ├── lowres_meanImg_C0_plane0_rotated.tiff         (rotated 2P mean)
 │           └── hires_stitched_plane0_rotated.tiff            (rotated 2P hi-res)
@@ -40,7 +40,9 @@ fetched by `fetch_demo_data.py`.
 - The pipeline environment with **Cellpose 4 / cellpose-SAM** (the demo manifest uses
   `model_path: "cpsam"`, which auto-downloads, so there are no model files to place). See the repo
   README's install section for the conda env.
-- A GPU is recommended (`gpu: true` in the manifest); set `gpu: false` to run on CPU (slower).
+- No GPU needed. The demo is one plane and one volume, which segment in reasonable time on a
+  CPU. If there is a GPU, Cellpose uses it; the manifest's `gpu: true` means "if there is one",
+  and `gpu: false` pins it to the CPU.
 
 ## Run it
 
@@ -51,13 +53,22 @@ Both commands run from the repository root. There is nothing to edit: the manife
    ```bash
    python demo/fetch_demo_data.py
    ```
+   Downloads 191 MB from this repo's
+   [releases page](https://github.com/orena1/easi-pass/releases), checks its sha256, and
+   unpacks it into `demo/demo_pre_run/`. Budget about **1.3 GB free**: 790 MB of input
+   images, and roughly 450 MB the run itself writes under `OUTPUT/`.
+
+   If the download fails, the archive `JS078_demo_pre_run.zip` can be fetched by hand from
+   that releases page and unzipped into `demo/`. Re-running the script is safe: it skips the
+   download when the data is already there, and `--force` re-fetches.
 
 2. **Run the pipeline:**
    ```bash
    python master_pipeline.py --manifest demo/JS078_demo.hjson
    ```
-   Stages: HCR segmentation → 2P segmentation → low-res→hi-res placement → 2P→HCR
-   registration (using the shipped seed landmarks) → cell matching → merged table.
+   Stages: prep → landmarks (already shipped, so no prompt) → 2P segmentation → HCR
+   segmentation → probe intensities → low-res→hi-res placement → 2P→HCR registration →
+   cell matching → merged table.
 
    **Answer the prompts as follows:**
    - `Verify 2P cellpose segmentations … press Enter` → press **Enter**.

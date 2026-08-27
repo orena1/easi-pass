@@ -47,7 +47,10 @@ except ImportError as exc:
             except Exception as _e2:          # noqa: BLE001 - reporting, not handling
                 _real = f"{_leaf}: {type(_e2).__name__}: {_e2}"
                 break
-    _env = os.environ.get('CONDA_DEFAULT_ENV') or os.environ.get('VIRTUAL_ENV') or '(none)'
+    # VIRTUAL_ENV first: a venv activated inside a conda env shadows it on PATH,
+    # so it is the one actually in use, and naming the conda env instead sends
+    # the reader to the wrong place.
+    _env = os.environ.get('VIRTUAL_ENV') or os.environ.get('CONDA_DEFAULT_ENV') or '(none)'
 
     _lines = ["EASI-PASS could not start: %s" % exc, ""]
     if len(_missing) > 3:
@@ -56,14 +59,14 @@ except ImportError as exc:
             "Nothing is installed in this environment, so this is almost certainly the",
             "wrong one. Active environment: %s" % _env,
             "",
-            "    conda env list          # the active environment is marked with *",
-            "    conda activate easipass",
+            "    source .venv/bin/activate      # or wherever you created it",
+            "    conda env list                 # if you used conda; active is marked *",
             "",
             "If you have not installed EASI-PASS yet, from the repository root:",
             "",
-            "    conda env create -f environment.yml",
-            "    conda activate easipass",
-            "    pip install -e .",
+            "    python3 -m venv .venv",
+            "    source .venv/bin/activate",
+            "    pip install -e . -c requirements.txt",
         ]
     elif _missing:
         _lines += [
@@ -72,7 +75,7 @@ except ImportError as exc:
             "",
             "Reinstall them with, from the repository root:",
             "",
-            "    pip install -e .",
+            "    pip install -e . -c requirements.txt",
         ]
     elif _real:
         # Everything on the list is present, but an internal module still failed to import. The
@@ -89,7 +92,7 @@ except ImportError as exc:
             "If that names a third-party package, install it and add it to _REQUIRED in",
             "master_pipeline.py so the next person gets told directly:",
             "",
-            "    pip install -e .",
+            "    pip install -e . -c requirements.txt",
         ]
     else:
         _lines += [
