@@ -72,20 +72,68 @@ _gpu_notices_printed = set()
 
 
 def _accelerator_name():
-    """Name the accelerator cellpose will actually use, or None for CPU."""
+    """Name the accelerator cellpose will actually use, or None for CPU.
+
+    Every backend torch can expose is checked, so the answer follows from whichever
+    torch is installed and needs nothing from the user. CUDA covers NVIDIA and also
+    AMD, since a ROCm build of torch reports itself through the same cuda API. MPS
+    is Apple silicon. XPU is Intel, and is absent from older torch.
+
+    Each check is wrapped: a half-installed driver raises here rather than returning
+    False, and a machine that cannot segment on its GPU should still segment.
+    """
     try:
         import torch
     except ImportError:      # cellpose cannot import without torch, so this is unreachable
         return None          # in practice; treat it as "no accelerator" rather than crash.
+
     try:
         if torch.cuda.is_available():
-            return f"CUDA ({torch.cuda.get_device_name(0)})"
-    except Exception:        # a broken/partial CUDA install raises rather than returning False
+            name = torch.cuda.get_device_name(0)
+            # torch.version.hip is set only on a ROCm build, where `cuda` is AMD.
+            vendor = "ROCm" if getattr(torch.version, 'hip', None) else "CUDA"
+            return f"{vendor} ({name})"
+    except Exception:
         pass
-    mps = getattr(torch.backends, 'mps', None)
-    if mps is not None and mps.is_available():
-        return "Apple MPS"
+
+    try:
+        mps = getattr(torch.backends, 'mps', None)
+        if mps is not None and mps.is_available():
+            return "Apple MPS"
+    except Exception:
+        pass
+
+    try:
+        xpu = getattr(torch, 'xpu', None)
+        if xpu is not None and xpu.is_available():
+            return f"Intel XPU ({xpu.get_device_name(0)})"
+    except Exception:
+        pass
+
     return None
+
+
+def _gpu_present_but_unusable():
+    """Whether an NVIDIA card is installed that torch declined to use.
+
+    `torch.cuda.is_available()` returns False for a machine with no GPU and for
+    a machine whose GPU torch cannot drive, and the two want completely different
+    advice. nvidia-smi answers the first half: if it runs, the hardware and the
+    kernel driver are both there, so the problem is on the torch side.
+    """
+    import shutil
+    import subprocess
+    if not shutil.which('nvidia-smi'):
+        return None
+    try:
+        out = subprocess.run(['nvidia-smi',
+                              '--query-gpu=name,driver_version',
+                              '--format=csv,noheader'],
+                             capture_output=True, text=True, timeout=10)
+    except Exception:        # driver present but wedged; not worth crashing over
+        return None
+    line = out.stdout.strip().splitlines()[0] if out.returncode == 0 and out.stdout.strip() else None
+    return line or None
 
 
 def _resolve_gpu(cellpose_params: dict, context: str) -> bool:
@@ -103,9 +151,25 @@ def _resolve_gpu(cellpose_params: dict, context: str) -> bool:
         if accelerator:
             rprint(f"[dim]Cellpose ({context}) on {accelerator}[/dim]")
         elif requested:
-            rprint("[yellow]No GPU available — running Cellpose on the CPU.[/yellow] "
-                   "[dim]Correct, but hours rather than minutes on full volumes. "
-                   "Set gpu: false in the manifest to silence this.[/dim]")
+            found = _gpu_present_but_unusable()
+            if found:
+                # The card is there and torch will not use it, which is nearly always
+                # the CUDA the wheel was built against: 12.4 needs driver 525 or newer
+                # and does not cover cards past Hopper.
+                import torch as _t
+                rprint(f"[yellow]Cellpose is on the CPU, though this machine has a GPU:"
+                       f" {found}[/yellow]")
+                rprint(f"[dim]  torch {_t.__version__} cannot drive it. A CUDA build reports a"
+                       " +cuNNN suffix; a bare version is CPU-only. The pinned build bundles"
+                       " CUDA 12.4, which wants driver 525 or newer and does not cover cards"
+                       " past Hopper (RTX 50 series and later).[/dim]")
+                rprint("[dim]  Fix: update the driver, or raise torch in constraints.txt and"
+                       " regenerate requirements.txt. Until then segmentation runs on the CPU,"
+                       " correctly and far slower. Set gpu: false to silence this.[/dim]")
+            else:
+                rprint("[yellow]No GPU found. Running Cellpose on the CPU.[/yellow] "
+                       "[dim]Correct, but hours and not minutes on full volumes. "
+                       "Set gpu: false in the manifest to silence this.[/dim]")
         else:
             rprint("[dim]Cellpose on the CPU (gpu: false)[/dim]")
     return bool(accelerator)

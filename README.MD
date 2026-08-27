@@ -142,12 +142,20 @@ No. Only Cellpose uses one; registration, matching and intensity extraction are 
 install is the same either way, and EASI-PASS names the device it got at the start of
 segmentation, so an unintended CPU fallback is visible and not silent.
 
-A full FISH volume (2500 x 2500 x 100 px) segments in a few minutes on a GPU and an hour or two without one. The
-demo 2p is a single plane and fine either way. To confirm a GPU before a long run:
+A full FISH volume (2500 x 2500 x 100 px) segments in a few minutes on a GPU and an hour or
+two without one. The demo 2P is a single plane and fine either way. To confirm a GPU before a
+long run:
 
 ```bash
-python -c "import torch; print(torch.cuda.is_available())"
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
+
+Both halves matter. The version should end `+cu124`; a bare `2.5.1` is a CPU-only build.
+`True` means torch can actually drive the card. **Any NVIDIA GPU works, within two bounds
+this pins:** the driver must be **525 or newer**, and cards past Hopper (the RTX 50 series and
+later) are outside what CUDA 12.4 covers. Either one gives `False` on a machine that plainly
+has a GPU, so the pipeline says which card it found and why it could not use it, and carries
+on using the CPU.
 
 `gpu` in each cellpose block defaults to true, meaning use an accelerator if one exists. Set
 `gpu: false` to force the CPU. If you already have masks you can skip segmentation entirely,
