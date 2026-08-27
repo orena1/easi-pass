@@ -104,8 +104,8 @@ No. Only Cellpose uses one; registration, matching and intensity extraction are 
 install is the same either way, and EASI-PASS names the device it got at the start of
 segmentation, so an unintended CPU fallback is visible and not silent.
 
-A full FISH volume segments in tens of minutes on a GPU and several hours without one. The
-demo is a single plane and fine either way. To confirm a GPU before a long run:
+A full FISH volume (2500 x 2500 x 100 px) segments in a few minutes on a GPU and an hour or two without one. The
+demo 2p is a single plane and fine either way. To confirm a GPU before a long run:
 
 ```bash
 python -c "import torch; print(torch.cuda.is_available())"
