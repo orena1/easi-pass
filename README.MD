@@ -60,7 +60,7 @@ versions on each. Development and testing happen on Linux, so that is where the 
 known to run end to end; the CUDA libraries are Linux-only, so a GPU only helps there.
 
 `requirements.txt` holds the exact versions the pipeline was validated with, and `-c` applies
-them, so you get that environment rather than whatever released this week. Keep the `-c` on
+them, so you get that environment and not whatever released this week. Keep the `-c` on
 any later install into the same environment, for the same reason.
 
 For the notebooks and analysis extras:
@@ -69,19 +69,17 @@ For the notebooks and analysis extras:
 uv pip install -e ".[notebooks,analysis]" -c requirements.txt
 ```
 
-Clone to local disk, not a network share — the editable install writes alongside the package
+Clone to local disk, not a network share: the editable install writes alongside the package
 and fails on some mounts.
 
 <details>
 <summary>If you already have Python 3.12 and would rather not install uv</summary>
 
-Check first, because the failure mode otherwise is obscure:
+Check the version first, because the failure otherwise is obscure:
 
 ```bash
 python3 -V        # must be 3.12 or newer
 ```
-
-Then the standard tools work:
 
 ```bash
 python3 -m venv .venv
@@ -96,14 +94,10 @@ If `python3 -m venv` itself fails, your distribution splits it into a separate p
 <details>
 <summary>If you have to use conda</summary>
 
-conda works, but it is slower for reasons that have nothing to do with this project: it
-downloads and indexes the whole of conda-forge's package metadata, several hundred megabytes,
-before installing anything, and it does that however little you ask it for. On the classic
-solver that step alone can take longer than the entire uv install. Use
+conda indexes the whole of conda-forge before installing anything, which on the classic
+solver takes longer than the entire uv install. Use
 [miniforge](https://github.com/conda-forge/miniforge) and check `conda config --show solver`
-reports `libmamba`.
-
-`environment.yml` supplies Python and nothing else; `requirements.txt` does the rest.
+reports `libmamba`. `environment.yml` supplies Python; `requirements.txt` does the rest.
 
 ```bash
 conda env create -f environment.yml
@@ -117,36 +111,23 @@ Cross-modal runs also need [Fiji](https://fiji.sc/)'s BigWarp for placing landma
 
 ### Do you need a GPU?
 
-No. Only Cellpose segmentation can use one. Registration, matching, intensity extraction and
-the merged tables are CPU-only, so a GPU changes how long you wait for masks and nothing else
-— same code, same numbers.
+No. Only Cellpose uses one; registration, matching and intensity extraction are CPU-only. The
+install is the same either way, and EASI-PASS names the device it got at the start of
+segmentation, so an unintended CPU fallback is visible and not silent.
 
-Without one, install exactly as above and run exactly as documented — there is no separate
-CPU install. Cellpose falls back to the CPU on its own, and EASI-PASS prints one line at the
-start of segmentation naming the device it got, so a fallback you did not intend is visible
-rather than silent. The only cost of the single install is disk: the Linux PyTorch wheels
-bundle CUDA whether or not you can use it, about 3 GB that then sits idle. As an order of
-magnitude for time: a full FISH volume that segments in tens of minutes on a GPU takes several
-hours on a CPU. The demo is one plane and one volume, and is comfortable either way.
-
-If you meant to use a GPU, confirm it is actually there before a long run:
+A full FISH volume segments in tens of minutes on a GPU and several hours without one. The
+demo is a single plane and fine either way. To confirm a GPU before a long run:
 
 ```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+python -c "import torch; print(torch.cuda.is_available())"
 ```
 
-It should print `True`. A machine that reports `False` keeps working, just far slower — which
-is easy to mistake for the pipeline being slow.
+`gpu` in each cellpose block defaults to true, meaning use an accelerator if one exists. Set
+`gpu: false` to force the CPU. If you already have masks you can skip segmentation entirely,
+see [Bringing your own masks](#bringing-your-own-masks).
 
-`gpu` in each cellpose block is optional and defaults to true, meaning *use an accelerator if
-there is one*. Set `gpu: false` to pin it to the CPU.
-
-If you already have masks, you can skip segmentation altogether — see
-[Bringing your own masks](#bringing-your-own-masks).
-
-RAM is the tighter constraint, and it scales with FISH volume size rather than with the GPU.
-Budget roughly 25 GB while a 2048 × 2048 × 100 round is being registered; a 64 GB machine is
-comfortable at that size.
+RAM matters more than the GPU, and scales with volume size: budget roughly 25 GB while a
+2048 x 2048 x 100 round is registered.
 
 ## Start with the demo
 
@@ -177,7 +158,7 @@ A hi-res image and the single-round case both work with no manifest change; see 
 the top of `demo_tiff.hjson`. Either template runs as it stands once the paths are yours.
 [`param_example.hjson`](examples/param_example.hjson) annotates the registration and matching
 parameters in more depth than the templates do; it has no `data` section, so read it alongside
-a template rather than starting from it.
+a template, not as a starting point.
 
 **2. Put your files where the manifest expects them.**
 
@@ -229,9 +210,9 @@ the flag to finish. Everything the check produced is reused.
 
 ### Bringing your own masks
 
-Segmentation is a stage, not a prerequisite. If you have already segmented one side — your own
-Cellpose run, hand-corrected masks, Suite2p ROIs, another tool entirely — hand those in and
-EASI-PASS registers and matches them instead of segmenting again.
+Segmentation is a stage, not a prerequisite. If you have already segmented one side, by your
+own Cellpose run, hand-corrected masks, Suite2p ROIs or another tool, hand those in and
+EASI-PASS registers and matches them without segmenting again.
 
 **Suite2p ROIs, on the functional side.** Set `masks: "suite2p"` on the session, and the
 pipeline reads `2P/suite2p/plane{N}/` (`stat.npy`, `iscell.npy`, `ops.npy`) from your sample
@@ -254,10 +235,10 @@ The two FISH rows are separate skips, and each stands alone. Masks in `cellpose/
 segmentation for that round; masks in `cellpose_aligned/` skip warping its labels into the
 reference frame, which is the one to use when your rounds are already registered to each
 other. Round-to-round registration is computed before that warp and still runs either way. For
-a single-round run there is nothing to warp — the reference round's masks are copied straight
-across — so `cellpose/` alone is enough.
+a single-round run there is nothing to warp, since the reference round's masks are copied
+straight across, so `cellpose/` alone is enough.
 
-Label 0 is background, and the ceiling is 65,535 cells per volume — the pipeline raises rather
+Label 0 is background, and the ceiling is 65,535 cells per volume. The pipeline raises rather
 than let `uint16` labels wrap. Number cells consecutively from 1, as Cellpose does. Write the
 file before the run reaches that stage, and delete it to segment again.
 
@@ -422,7 +403,7 @@ Per round: `round` (e.g. `"01"`), `channels` (the nuclear stain used for registr
 first), `resolution` (voxel size `[x, y, z]` in microns, from your confocal metadata).
 
 Per session: `functional_planes` (the first is the reference plane for landmark alignment),
-`input_format`, and optionally `masks` to reuse Suite2p ROIs instead of segmenting
+`input_format`, and optionally `masks` to reuse Suite2p ROIs in place of segmenting
 (see [Bringing your own masks](#bringing-your-own-masks)).
 
 **`params`**
@@ -454,7 +435,7 @@ and the rest of the pipeline is identical.
 
 `input_format` and `masks` are separate choices and do not have to agree. `input_format` says
 where the image comes from; `masks` says where the cells come from. `input_format: "tiff"`
-with `masks: "suite2p"` is a normal combination — your own TIFF mean image, your own Suite2p
+with `masks: "suite2p"` is a normal combination: your own TIFF mean image, your own Suite2p
 ROIs, and no segmentation run at all. The one thing to get right is that the two describe the
 same pixel grid: export the TIFF from the same Suite2p `ops['meanImg']` the ROIs were drawn
 on, uncropped and unresampled.
