@@ -31,16 +31,6 @@ def find_tables(output_dir: Path, want_plane: str = None):
     feat_dir = output_dir / "MERGED" / "aligned_extracted_features"
     tables = sorted(feat_dir.glob("full_table_*_twop_plane*.csv"))
     if not tables:
-        # A FISH-only run produces no twop_plane table, which is not the same
-        # problem as an unfinished run, and the two need different advice.
-        if (output_dir / "HCR" / "extract_intensities").exists():
-            raise SystemExit(
-                f"No cross-modal table under {feat_dir}, but this run has FISH "
-                "output.\nThat is what a FISH-only run looks like (--only_hcr, or a "
-                "manifest with\nno two_photon_imaging section). Everything below "
-                "describes the match\nbetween a functional plane and the FISH volume, "
-                "which such a run does not\nproduce, so there is nothing here for this "
-                "script to show.")
         raise SystemExit(
             f"No merged table under {feat_dir}.\n"
             "Run the pipeline first, or point --output at a finished OUTPUT folder.")
@@ -110,11 +100,20 @@ def main():
     n_iou = int(merged["twoP_iou_match"].notna().sum())
     confident = merged["twoP_somaprint_confident"].fillna(False).astype(bool)
     n_soma = int(confident.sum())
-    print(f"\n  Matched to the functional plane, by two independent matchers:")
-    print(f"    twoP_iou_match       {n_iou:>6}  cells matched by mask overlap")
-    print(f"    twoP_somaprint_match {n_soma:>6}  cells matched confidently by soma-print")
-    print(f"    the rest ({len(merged) - n_iou} cells) are elsewhere in the volume,")
-    print(f"    outside the field the functional recording covered.")
+    # A FISH-only run writes this table too, with the twoP_ columns present but
+    # empty, so their emptiness is what distinguishes the two cases.
+    has_functional = n_iou > 0
+    if has_functional:
+        print(f"\n  Matched to the functional plane, by two independent matchers:")
+        print(f"    twoP_iou_match       {n_iou:>6}  cells matched by mask overlap")
+        print(f"    twoP_somaprint_match {n_soma:>6}  cells matched confidently by soma-print")
+        print(f"    the rest ({len(merged) - n_iou} cells) are elsewhere in the volume,")
+        print(f"    outside the field the functional recording covered.")
+    else:
+        print("\n  The twoP_ columns are empty, so no functional plane was matched.")
+        print("  That is what a FISH-only run looks like (--only_hcr, or a manifest")
+        print("  with no two_photon_imaging). The gene columns below are unaffected;")
+        print("  only the cross-modal panels are skipped.")
 
     # ------------------------------------------------------------- coordinates
     print("\n" + "=" * 72)
@@ -134,7 +133,7 @@ def main():
     # -------------------------------------------------------------- functional
     mean_path = out / "2P" / "cellpose" / f"lowres_meanImg_C0_plane{plane}.tiff"
     mask_path = out / "2P" / "cellpose" / f"lowres_meanImg_C0_plane{plane}_masks.tiff"
-    have_2p = mean_path.exists() and mask_path.exists()
+    have_2p = has_functional and mean_path.exists() and mask_path.exists()
     if have_2p:
         mean_img = imread(mean_path).astype(float)
         masks_2p = imread(mask_path)
@@ -151,54 +150,63 @@ def main():
     candidates = [g for g in genes if "DAPI" not in g.upper()] or genes
     show = sorted(candidates, key=lambda g: merged[g].median(), reverse=True)[:2]
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 9.5))
-    fig.suptitle(f"EASI-PASS results, functional plane {plane}", fontsize=14, y=0.98)
-
-    # 1. the functional field, coloured by whether each cell matched
-    ax = axes[0, 0]
-    if have_2p:
-        lo, hi = np.percentile(mean_img, [1, 99.5])
-        ax.imshow(np.clip((mean_img - lo) / max(hi - lo, 1e-9), 0, 1), cmap="gray")
-        rgb = np.zeros((*masks_2p.shape, 4))
-        ids = np.arange(n_cells_2p + 1)
-        is_matched = np.isin(ids, list(matched_ids))
-        lut = np.zeros((n_cells_2p + 1, 4))
-        lut[is_matched] = [0.15, 0.75, 0.35, 0.65]     # green: found a partner
-        lut[~is_matched] = [0.90, 0.25, 0.25, 0.65]    # red: did not
-        lut[0] = [0, 0, 0, 0]                          # background stays clear
-        rgb = lut[masks_2p]
-        ax.imshow(rgb)
-        ax.set_title(f"Functional cells: {len(matched_ids)} matched (green),\n"
-                     f"{n_cells_2p - len(matched_ids)} not (red)")
+    # The top row is entirely about the functional match, so a FISH-only run drops
+    # it rather than printing three empty axes.
+    if has_functional:
+        fig, axes = plt.subplots(2, 3, figsize=(16, 9.5))
+        fig.suptitle(f"EASI-PASS results, functional plane {plane}", fontsize=14, y=0.98)
+        top, gene_axes, hist_ax = axes[0], axes[1, :2], axes[1, 2]
     else:
-        ax.text(0.5, 0.5, "functional mean image not found", ha="center", va="center")
-    ax.set_xticks([]); ax.set_yticks([])
+        fig, row = plt.subplots(1, 3, figsize=(16, 5))
+        fig.suptitle("EASI-PASS results, FISH only", fontsize=14, y=0.98)
+        top, gene_axes, hist_ax = None, row[:2], row[2]
 
-    # 2. where that plane sits in the FISH volume
-    ax = axes[0, 1]
-    ax.scatter(df.X, df.Y, s=1, c="0.85", linewidths=0, label=f"all FISH cells ({len(df)})")
-    ax.scatter(df.X[matched], df.Y[matched], s=3, c="#268c46", linewidths=0,
-               label=f"matched ({int(matched.sum())})")
-    ax.set_aspect("equal"); ax.invert_yaxis()
-    ax.set_xlabel("X (px)"); ax.set_ylabel("Y (px)")
-    ax.set_title("Where the functional plane landed\nin the FISH volume")
-    ax.legend(loc="upper right", frameon=False, fontsize=8, markerscale=3)
+    if top is not None:
+        # 1. the functional field, coloured by whether each cell matched
+        ax = top[0]
+        if have_2p:
+            lo, hi = np.percentile(mean_img, [1, 99.5])
+            ax.imshow(np.clip((mean_img - lo) / max(hi - lo, 1e-9), 0, 1), cmap="gray")
+            ids = np.arange(n_cells_2p + 1)
+            is_matched = np.isin(ids, list(matched_ids))
+            lut = np.zeros((n_cells_2p + 1, 4))
+            lut[is_matched] = [0.15, 0.75, 0.35, 0.65]     # green: found a partner
+            lut[~is_matched] = [0.90, 0.25, 0.25, 0.65]    # red: did not
+            lut[0] = [0, 0, 0, 0]                          # background stays clear
+            ax.imshow(lut[masks_2p])
+            ax.set_title(f"Functional cells: {len(matched_ids)} matched (green),\n"
+                         f"{n_cells_2p - len(matched_ids)} not (red)")
+        else:
+            ax.text(0.5, 0.5, "functional mean image not found",
+                    ha="center", va="center")
+        ax.set_xticks([]); ax.set_yticks([])
 
-    # 3. how good the overlaps were
-    ax = axes[0, 2]
-    iou = merged.loc[matched, "twoP_iou"].dropna()
-    ax.hist(iou, bins=40, color="#4878a8")
-    ax.axvline(iou.median(), color="k", ls="--", lw=1,
-               label=f"median {iou.median():.2f}")
-    ax.set_xlabel("twoP_iou"); ax.set_ylabel("cells")
-    ax.set_title("Overlap of the matched pairs")
-    ax.legend(frameon=False, fontsize=8)
+        # 2. where that plane sits in the FISH volume
+        ax = top[1]
+        ax.scatter(df.X, df.Y, s=1, c="0.85", linewidths=0,
+                   label=f"all FISH cells ({len(df)})")
+        ax.scatter(df.X[matched], df.Y[matched], s=3, c="#268c46", linewidths=0,
+                   label=f"matched ({int(matched.sum())})")
+        ax.set_aspect("equal"); ax.invert_yaxis()
+        ax.set_xlabel("X (px)"); ax.set_ylabel("Y (px)")
+        ax.set_title("Where the functional plane landed\nin the FISH volume")
+        ax.legend(loc="upper right", frameon=False, fontsize=8, markerscale=3)
 
-    # 4-5. genes in space. Every cell is drawn faint and the expressing ones are
-    # drawn on top. Colouring all 21,000 by raw intensity does not work: the
-    # distribution is so skewed that almost every cell sits at the bottom of the
-    # colour map and the plot reads as uniformly dark.
-    for ax, gene in zip(axes[1, :2], show):
+        # 3. how good the overlaps were
+        ax = top[2]
+        iou = merged.loc[matched, "twoP_iou"].dropna()
+        ax.hist(iou, bins=40, color="#4878a8")
+        ax.axvline(iou.median(), color="k", ls="--", lw=1,
+                   label=f"median {iou.median():.2f}")
+        ax.set_xlabel("twoP_iou"); ax.set_ylabel("cells")
+        ax.set_title("Overlap of the matched pairs")
+        ax.legend(frameon=False, fontsize=8)
+
+    # genes in space. Every cell is drawn faint and the expressing ones are drawn
+    # on top. Colouring all 21,000 by raw intensity does not work: the distribution
+    # is so skewed that almost every cell sits at the bottom of the colour map and
+    # the plot reads as uniformly dark.
+    for ax, gene in zip(gene_axes, show):
         v = df[gene].to_numpy()
         cut = np.nanpercentile(v, 90)
         hi = np.nanpercentile(v, 99.5)
@@ -214,18 +222,25 @@ def main():
                      f"the rest in grey")
         plt.colorbar(sc, ax=ax, fraction=0.046, label="intensity")
 
-    # 6. what one gene looks like across the matched cells. Most cells sit near
-    # zero with a long tail, which is the shape that decides where a "positive"
-    # threshold goes, so plot it rather than a summary statistic.
-    ax = axes[1, 2]
+    # what one gene looks like across the cells. Most sit near zero with a long
+    # tail, which is the shape that decides where a "positive" threshold goes, so
+    # plot it rather than a summary statistic. With no functional match there is
+    # no matched subset to take, so this is every cell in the reference round.
+    ax = hist_ax
     gene = show[0]
-    vals = merged.loc[matched, gene].dropna()
+    subset = merged.loc[matched, gene] if has_functional else merged[gene]
+    vals = subset.dropna()
     ax.hist(vals, bins=45, color="#4878a8")
     ax.axvline(np.percentile(vals, 90), color="crimson", ls="--", lw=1,
                label=f"90th pct = {np.percentile(vals, 90):.2f}")
     ax.set_yscale("log")
-    ax.set_xlabel(gene.replace(f"{feature}_", "")); ax.set_ylabel("matched cells (log)")
-    ax.set_title(f"One gene across the {int(matched.sum())} matched cells")
+    ax.set_xlabel(gene.replace(f"{feature}_", ""))
+    if has_functional:
+        ax.set_ylabel("matched cells (log)")
+        ax.set_title(f"One gene across the {int(matched.sum())} matched cells")
+    else:
+        ax.set_ylabel("cells (log)")
+        ax.set_title(f"One gene across all {len(vals)} cells")
     ax.legend(frameon=False, fontsize=8)
 
     fig.tight_layout(rect=[0, 0, 1, 0.96])
@@ -237,7 +252,8 @@ def main():
     print("\nTo carry on from here:")
     print("  import pandas as pd")
     print(f"  df = pd.read_csv(r'{table_path}')")
-    print("  df[df.twoP_iou_match.notna()]        # cells with a functional partner")
+    if has_functional:
+        print("  df[df.twoP_iou_match.notna()]        # cells with a functional partner")
     print(f"  df.nlargest(20, '{show[0]}')" if show else "")
 
 
