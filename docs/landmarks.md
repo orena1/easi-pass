@@ -6,7 +6,9 @@ time it needs them; this page covers what to install, where the file goes, and w
 has to contain.
 
 Landmarks are placed in [Fiji](https://fiji.sc/)'s BigWarp, under
-**Plugins > BigDataViewer > Big Warp**.
+**Plugins > BigDataViewer > Big Warp**. If you have not driven BigWarp before, work through
+[BigWarp_Tips.md](BigWarp_Tips.md) first: what order to do things in, the keys that matter, and
+why the tissue gets squared up before you look for a single landmark.
 
 ## What the pipeline asks for
 

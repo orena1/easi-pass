@@ -2,7 +2,10 @@ easipass/processing_notebooks/HCR_rounds/.*
 __pycache__/
 **/*.pyc
 **/.ipynb_checkpoints/
+# Notebooks are development scratch and stay untracked, with one exception: the
+# demo's results walkthrough ships, so people have something to open after a run.
 *.ipynb
+!demo/explore_results.ipynb
 
 # Build and virtualenv output. `pip install -e .` drops an egg-info tree next to
 # the package, and the lock files are meant to be installed into a venv here.
@@ -78,6 +81,7 @@ easipass/processing_notebooks/HCR_rounds/_ablation_dumps/
 # Internal audit/planning docs. Only user-facing docs are tracked, by exception.
 docs/*.md
 !docs/landmarks.md
+!docs/BigWarp_Tips.md
 
 # --- Internal-only files kept on disk but never published ---
 # Lab env dump; notebook import shim (stale module names + hardcoded personal
