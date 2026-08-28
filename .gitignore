@@ -82,6 +82,11 @@ easipass/processing_notebooks/HCR_rounds/_ablation_dumps/
 docs/*.md
 !docs/landmarks.md
 !docs/BigWarp_Tips.md
+!docs/install.md
+!docs/manifest.md
+!docs/masks.md
+!docs/outputs.md
+!docs/rerunning.md
 
 # --- Internal-only files kept on disk but never published ---
 # Lab env dump; notebook import shim (stale module names + hardcoded personal
