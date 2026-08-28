@@ -5,8 +5,12 @@ saves one figure showing the things worth checking first: which cells matched,
 where the functional plane landed in the volume, and what the genes look like
 in space.
 
-    python demo/explore_results.py                       # the demo run
+    python demo/explore_results.py                        # the demo run
     python demo/explore_results.py --output PATH/OUTPUT   # your own run
+    python demo/explore_results.py --plane 2              # a specific plane
+
+Needs a run that matched a functional plane to the FISH volume. A FISH-only run
+produces no cross-modal table, so there is nothing here to show for one.
 
 Everything here uses the two small tables plus the functional mean image. The
 mask volumes are hundreds of megabytes and nothing below needs them.
@@ -22,21 +26,44 @@ import matplotlib.pyplot as plt
 from tifffile import imread
 
 
-def find_tables(output_dir: Path):
+def find_tables(output_dir: Path, want_plane: str = None):
     """Locate one plane's tables. Returns (merged, intensities, plane, feature)."""
     feat_dir = output_dir / "MERGED" / "aligned_extracted_features"
     tables = sorted(feat_dir.glob("full_table_*_twop_plane*.csv"))
     if not tables:
+        # A FISH-only run produces no twop_plane table, which is not the same
+        # problem as an unfinished run, and the two need different advice.
+        if (output_dir / "HCR" / "extract_intensities").exists():
+            raise SystemExit(
+                f"No cross-modal table under {feat_dir}, but this run has FISH "
+                "output.\nThat is what a FISH-only run looks like (--only_hcr, or a "
+                "manifest with\nno two_photon_imaging section). Everything below "
+                "describes the match\nbetween a functional plane and the FISH volume, "
+                "which such a run does not\nproduce, so there is nothing here for this "
+                "script to show.")
         raise SystemExit(
             f"No merged table under {feat_dir}.\n"
             "Run the pipeline first, or point --output at a finished OUTPUT folder.")
+
+    planes = sorted({t.stem.split("_twop_plane")[-1] for t in tables})
+    if want_plane is None:
+        plane = planes[0]
+        if len(planes) > 1:
+            print(f"Planes in this run: {', '.join(planes)}. Showing plane {plane}; "
+                  "pass --plane to pick another.\n")
+    elif want_plane in planes:
+        plane = want_plane
+    else:
+        raise SystemExit(f"No table for plane {want_plane}. "
+                         f"This run has: {', '.join(planes)}")
+
+    tables = [t for t in tables if t.stem.endswith(f"_twop_plane{plane}")]
 
     # Several features can be written (plain mean, neuropil-corrected, ...). They
     # share every column except the intensities, so the plain one is the simplest
     # thing to open first.
     table = next((t for t in tables if "_neuropil" not in t.name), tables[0])
     stem = table.stem                       # full_table_{feature}_twop_plane{N}
-    plane = stem.split("plane")[-1]
     feature = stem[len("full_table_"):stem.rindex("_twop_plane")]
 
     intensities = sorted((output_dir / "HCR" / "extract_intensities")
@@ -53,6 +80,8 @@ def main():
     ap.add_argument("--output", type=Path,
                     default=Path(__file__).parent / "demo_pre_run" / "JS078_demo" / "OUTPUT",
                     help="a finished OUTPUT folder (default: the demo run)")
+    ap.add_argument("--plane", default=None,
+                    help="which functional plane to show (default: the first one found)")
     ap.add_argument("--save", type=Path, default=None,
                     help="where to write the figure (default: <output>/explore_results.png)")
     args = ap.parse_args()
@@ -63,7 +92,7 @@ def main():
                          "  python demo/fetch_demo_data.py\n"
                          "  python master_pipeline.py --manifest demo/JS078_demo.hjson")
 
-    table_path, inten_path, plane, feature = find_tables(out)
+    table_path, inten_path, plane, feature = find_tables(out, args.plane)
 
     # ---------------------------------------------------------------- the table
     print("=" * 72)
