@@ -3,21 +3,12 @@
 EASI-PASS needs **Python 3.12**. Installing into an older one fails with errors that name the
 wrong thing, so use one of the routes below rather than plain `pip`.
 
-All three give the identical environment. Use whichever tool you already have.
-
-## conda
-
-```bash
-git clone https://github.com/orena1/easi-pass.git
-cd easi-pass
-conda env create -f environment.yml && conda activate easipass
-pip install -e . -c requirements.txt
-```
+All three give the identical environment.
 
 ## uv
 
-[uv](https://docs.astral.sh/uv/) downloads its own copy of Python, so nothing has to be set up
-first.
+Recommended. [uv](https://docs.astral.sh/uv/) resolves and installs far faster than pip or
+conda, and it downloads its own copy of Python, so nothing has to be set up first.
 
 ```bash
 git clone https://github.com/orena1/easi-pass.git
@@ -34,6 +25,15 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"      # Windows
 ```
 
 Then open a new shell, or `export PATH="$HOME/.local/bin:$PATH"`.
+
+## conda
+
+```bash
+git clone https://github.com/orena1/easi-pass.git
+cd easi-pass
+conda env create -f environment.yml && conda activate easipass
+pip install -e . -c requirements.txt
+```
 
 ## venv
 

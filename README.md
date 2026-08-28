@@ -20,7 +20,19 @@ orientation, place landmarks, check the segmentation, and accept the alignment.
 
 ## Installation
 
-Python 3.12. About four minutes.
+Python 3.12. A few minutes. Both routes give the identical environment.
+
+**[uv](https://docs.astral.sh/uv/)**, recommended: far faster, and it downloads its own Python,
+so nothing has to be set up first.
+
+```bash
+git clone https://github.com/orena1/easi-pass.git
+cd easi-pass
+uv venv --python 3.12 && source .venv/bin/activate
+uv pip install -e . -c requirements.txt
+```
+
+**conda:**
 
 ```bash
 git clone https://github.com/orena1/easi-pass.git
@@ -29,10 +41,11 @@ conda env create -f environment.yml && conda activate easipass
 pip install -e . -c requirements.txt
 ```
 
-Activate again in every new shell: `conda activate easipass`. No GPU required. Cross-modal runs
-also need [Fiji](https://fiji.sc/) for landmarks.
+Activate again in every new shell: `source .venv/bin/activate` (`.venv\Scripts\activate` on
+Windows), or `conda activate easipass`. No GPU required. Cross-modal runs also need
+[Fiji](https://fiji.sc/) for landmarks.
 
-uv, venv, the GPU check, troubleshooting: [docs/install.md](docs/install.md).
+Installing uv, plain venv, the GPU check, troubleshooting: [docs/install.md](docs/install.md).
 
 ## Demo
 
