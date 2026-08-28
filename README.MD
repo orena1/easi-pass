@@ -21,8 +21,9 @@ EASI-PASS takes their output as input.
 | Hi-res structural image *(optional)* | One stitched 2D TIFF per plane. Improves the alignment when the mean image is too coarse to landmark directly |
 | A few landmarks | Placed once in [BigWarp](https://imagej.net/plugins/bigwarp), between one functional plane and the reference FISH volume. Not needed for FISH-only runs, and the demo ships its own |
 
-Everything else is set in a manifest. The run pauses a few times, to settle the orientation,
-place landmarks, check the segmentation and accept the alignment; the rest is automatic.
+Everything else is set in a manifest. The run stops and waits at four points: to set the
+orientation, place landmarks, check the segmentation, and accept the alignment. The rest is
+automatic.
 
 ## Ways to run this
 
@@ -259,7 +260,7 @@ against reference 01 is `HCR02_to_HCR01_masks.tiff`.
 | Step | |
 |---|---|
 | **1. Orient the functional image** | The pipeline prints both paths and waits. Open them, and if one is mirrored, add `fliplr` or `flipud` to `rotation_2p_to_HCR`. ScanBox input is stitched here too |
-| **2. Place landmarks** | A handful of points in BigWarp, functional plane against the reference FISH volume. Before Cellpose on purpose, so a bad alignment surfaces in minutes rather than after an hour of segmentation |
+| **2. Place landmarks** | A handful of points in BigWarp, functional plane against the reference FISH volume. Before Cellpose on purpose, so you see a bad alignment in minutes rather than after an hour of segmentation |
 
 **Segmentation**
 
@@ -295,7 +296,8 @@ to a functional plane.
 Three things worth knowing:
 
 - **A flip is not a rotation.** Only the flip has to be right at step 1, because BigWarp cannot
-  mirror an image. Rotation is absorbed by the landmarks at step 2.
+  mirror an image. You never set the rotation: the landmark pairs you place at step 2 already
+  describe it.
 - **Round-to-round registration uses cell centroids**, not detected spots. If rounds register
   poorly, check the reference round's Cellpose segmentation first, since every centroid is from
   it.
