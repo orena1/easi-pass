@@ -1,20 +1,22 @@
 # BigWarp tips
 
-How to place the landmarks: what the panels are, what order to work in, and the keys that
-matter. For what the pipeline needs from you (filename, CSV columns, the calibration gate,
-what to do when the alignment comes out wrong) see [landmarks.md](landmarks.md).
+How to place the landmarks: what the two panels are, what order to work in, and the keys that
+matter. For what the pipeline needs from you, see [landmarks.md](landmarks.md): the filename,
+the CSV columns, the calibration gate, and what to do when the alignment comes out wrong.
 
-BigWarp is not ours. The [imagej.net page](https://imagej.net/plugins/bigwarp) has the full
-command list and is the authority if anything here disagrees with it;
-[Bogovic's walkthrough video](https://www.youtube.com/watch?v=EApotxnnQD8) is worth watching
-once. **F1** inside BigWarp prints the bindings for your installed version. The demo ships both
-images and a finished 18-point set to practise on ([demo/README.md](../demo/README.md)).
+BigWarp is not ours. The [imagej.net page](https://imagej.net/plugins/bigwarp) lists every
+command and is the authority if anything here disagrees with it, and
+[Bogovic's video](https://www.youtube.com/watch?v=EApotxnnQD8) is worth watching once. Inside
+BigWarp, **F1** prints the bindings for your installed version. To practise before doing this
+for real, the demo ships both images and a finished 18-point set
+([demo/README.md](../demo/README.md)).
 
 ## What you are doing
 
 You are not moving an image. You are telling BigWarp that this point here is that point there,
-one pair at a time, and it fits a thin-plate spline through the pairs. The warp on screen is a
-live preview, recomputed on every new point, and nothing reaches disk until you export.
+one pair at a time, and it fits a thin-plate spline through the pairs. What you see on screen is
+a preview of that fit. It is recomputed every time you add a point, and nothing reaches disk
+until you export, so a point costs nothing: place it, look, move it.
 
 | Panel | Image | Which file |
 |---|---|---|
@@ -29,30 +31,31 @@ The pipeline prints both paths when it pauses. Open them in Fiji, launch
 ## Flips must be fixed before you get here
 
 **BigWarp has no mirror or flip.** It rotates, pans, zooms and warps, and that is all. If your
-2P plane is mirrored relative to the FISH volume, no amount of landmarking will fix it and the
-run is wasted.
+2P plane is mirrored relative to the FISH volume, landmarking cannot fix it and the run is
+wasted.
 
-That is why the pipeline stops on an `ORIENTATION` banner beforehand: look at the two images and
-put any `"fliplr": true` or `"flipud": true` into the manifest. You are not asked for the
-rotation, because each landmark pair records it. On a plane already oriented, the prompt does not
-return until you delete its `*_rotated.tiff` under `OUTPUT/2P/registered/`.
+That is why the pipeline stops on an `ORIENTATION` banner first. Look at the two images it
+names, and if one is mirrored, put `"fliplr": true` or `"flipud": true` in the manifest. It does
+not ask about rotation, because each landmark pair you place records that already. Once a plane
+has been oriented the prompt stops appearing; delete that plane's `*_rotated.tiff` under
+`OUTPUT/2P/registered/` to get it back.
 
-## Rotate the tissue into rough alignment first
+## Rotate the tissue into rough alignment
 
-Rotation is the part you *can* fix here, and doing it first saves time. Two modalities are hard
-enough to match; two that also sit 20 degrees apart are much harder, because your eye stops
+Rotation is the part you can fix here, and fixing it first saves time. Two modalities are hard
+enough to match. Two that also sit 20 degrees apart are much harder, because your eye stops
 reading the same group of cells as the same group.
 
-**X**, **Y** or **Z** picks the rotation axis, the **arrow keys** rotate, **Shift+X/Y/Z**
-rotates to that plane. This only changes the view: landmarks are stored in image coordinates, so
-what you export is the same either way. Rotate freely.
+Press **X**, **Y** or **Z** to pick the axis, then rotate with the **arrow keys**;
+**Shift+X/Y/Z** rotates straight to that plane. Only the view changes. Landmarks are stored in
+image coordinates, so you export the same file however you were looking at it. Rotate freely.
 
 <!-- SCREENSHOT 02: before/after pair of the two panels, first badly rotated relative to each other, then squared up. -->
 
-## One channel pair at a time
+## Show one channel pair at a time
 
-Showing every channel at once makes the field unreadable. Put one on each side, matched to a
-channel that stains the same thing (**F3** and **F4** open the visibility dialogs):
+Every channel at once is unreadable. Put one on each side, matched to a channel that stains the
+same thing. **F3** and **F4** open the visibility dialogs for the moving and target images.
 
 | Moving (2P) | Target (FISH) | What you are matching |
 |---|---|---|
@@ -60,68 +63,73 @@ channel that stains the same thing (**F3** and **F4** open the visibility dialog
 | sparse marker | tdTomato | the few bright labelled cells, unambiguous where present |
 | GCaMP | anti-GCaMP HCR probe | GCaMP-expressing cells directly, if a round carries the probe |
 
-Switch between pairings as you go: the sparse marker gives a few certain correspondences,
-cytoDAPI gives coverage everywhere else, and neither alone gets you a well-spread set.
+Switch between these pairings as you work. The sparse marker gives you a handful of certain
+correspondences. cytoDAPI gives you coverage everywhere else. You need both.
 
-**Re-do the contrast on every switch.** Skipping this is what makes people conclude the images
-do not match. The two modalities share nothing in their intensity distributions, so a channel
-that looks empty at the previous display range usually comes back once you stretch it. Adjust
-both sides until they are comparable to your eye, not until either is objectively correct.
+**Re-do the contrast every time you switch.** Skip it and you will conclude the images do not
+match. The two modalities share nothing in their intensity distributions, so a channel that
+looks empty at the previous display range usually appears as soon as you stretch it. Adjust both
+sides until they look comparable to your eye, which is not the same as either one being correct.
 
 <!-- SCREENSHOT 03: same target channel at a bad display range (near-black) and after adjustment (structure visible), side by side. -->
 
 ## Get your bearings
 
-Find the large structures first: white matter tracts, ventricle boundaries, an abrupt
-cytoarchitectural change, the tissue edge. These are too coarse to landmark, but they tell you
-where in the FISH volume you are. Scroll the target through z (**mouse wheel**, or **,** and
-**.**) until the slice looks like the same piece of tissue as your plane.
+Start with the big structures: white matter tracts, ventricle boundaries, an abrupt change in
+cytoarchitecture, the tissue edge. They are too coarse to landmark, but they tell you where in
+the volume you are. Scroll the target through z with the **mouse wheel**, or **,** and **.**,
+until the slice looks like the same piece of tissue as your plane.
 
-## The first four points
+## Place the first four points
 
-**space** toggles landmark mode, in which a left click places a point instead of navigating.
-Click a feature in the moving panel, then the same feature in the target panel, and the pair
-becomes a row in the landmark table. **Shift+left-drag** does both ends at once, **Ctrl+Z**
+Press **space** for landmark mode, where a left click places a point instead of navigating.
+Click a feature in the moving panel, then the same feature in the target panel. The pair becomes
+a row in the landmark table. **Shift+left-drag** does both ends in one gesture, and **Ctrl+Z**
 undoes.
 
 Four is the minimum worth pressing **T** on. Put them near the four edges of the field rather
-than together in the middle, and take them from wherever you are most certain, usually the
-sparse-marker cells. What you can still recognise in the other modality is the arrangement, not
-the brightness: a distinctive triangle of three neighbouring somata, or a soma in a notch of a
-vessel. The single brightest object rarely works, since what is brightest in 2P has no reason to
-be brightest in FISH.
+than together in the middle, and start with the cells you are surest of, usually the
+sparse-marker ones.
 
-Set the target z per point, at the slice where that cell is in focus. Those z values are
-supposed to differ across the field ([landmarks.md](landmarks.md#placing-the-points)).
+Choose landmarks by their arrangement, not their brightness. A triangle of three neighbouring
+somata is recognisable in the other modality, and so is a soma tucked into a bend of a vessel.
+The brightest cell in the 2P image usually is not, because nothing makes it the brightest one in
+FISH.
+
+Set the target z for each point individually, at the slice where that cell is in focus. Those z
+values are meant to differ across the field ([landmarks.md](landmarks.md#placing-the-points)).
 
 <!-- SCREENSHOT 04: landmark mode on, one pair being placed, the new row visible in the landmark table. -->
 <!-- SCREENSHOT 05: zoomed crop of one good landmark in both modalities, with the neighbouring-soma arrangement circled. -->
 
 ## Press T, then work outward
 
-**T** toggles the moving panel between warped and raw. With four points in, the two panels line
-up approximately, and finding the next landmark gets much easier: instead of searching two
-dissimilar images for something in common, you are looking for a cell sitting a few pixels off
-its partner. Each point you add improves the warp near it, which makes the region just beyond it
-easier to read, so work outward from the points you have rather than jumping across the field.
+**T** switches the moving panel between warped and raw. With four points in, the two panels line
+up roughly, and the job gets much easier: instead of hunting two dissimilar images for something
+in common, you are looking for a cell that sits a few pixels off its partner.
+
+Every point you add improves the warp around it, which makes the region just beyond it readable,
+which gives you the next point. So work outward from what you have. Jumping to the far side of
+the field means starting from scratch again.
 
 <!-- SCREENSHOT 06: T pressed with only ~4 points: centre approximately aligned, edges clearly wrong. -->
 
-## Coverage beats count
+## Cover the field
 
-What matters is not the total but whether any sizeable region has none. The spline only fits
-where you gave it points; across a region with none, it interpolates from the surrounding
-points, and that guess can be far off. Empty corners and edges are where cross-modal alignment
-fails first. Fifteen to twenty-five well-spread points is usually enough (the demo ships 18).
-Before exporting, show the points (**V**, and **N** for names), find the emptiest quarter of the
+What matters is not the total but whether some large region has nothing in it. The spline only
+fits where you gave it points. Elsewhere it interpolates from the points around it, and that
+guess can be far off, which is why alignment fails at empty corners and edges first.
+
+Fifteen to twenty-five well-spread points is usually enough, and the demo ships 18. Before you
+export, press **V** to show the points (**N** for their names), find the emptiest quarter of the
 image, and put two there.
 
 <!-- SCREENSHOT 07: the finished 18-point set with points visible, showing spread to the edges, and T on: the two panels in agreement. -->
 
 ## When you get lost
 
-The panels navigate independently, so it is easy to end up looking at tissue you cannot place.
-These four get you back:
+The panels navigate independently, so you will end up looking at tissue you cannot place. These
+four get you back:
 
 | Key | Does |
 |---|---|
@@ -130,25 +138,27 @@ These four get you back:
 | **E** | centre the active viewer on the nearest landmark |
 | **R** | reset the active viewer |
 
-**Ctrl+D** and **Ctrl+Shift+D** step through the landmarks you have placed, which is the fast
-way to audit a finished set.
+**Ctrl+D** and **Ctrl+Shift+D** step through the points you have placed, which is the quick way
+to audit a finished set.
 
 ## Transform type
 
-**F2** selects what BigWarp fits. Leave it on **thin-plate spline**, which is what the pipeline
-assumes. Affine or similarity is occasionally useful as a check while placing the first few
-points, since neither bends to fit a badly placed pair the way the spline does; switch back
-before exporting.
+**F2** chooses what BigWarp fits. Leave it on **thin-plate spline**, which is what the pipeline
+assumes. Affine and similarity are useful as a check while you have only a few points, because
+neither bends to accommodate a badly placed pair the way the spline does. Switch back before you
+export.
 
 ## Export
 
-**File > Export landmarks**, or **Ctrl+S**, to the exact path the pipeline printed
-([landmarks.md](landmarks.md#what-the-pipeline-asks-for) has the pattern and the columns).
-**Ctrl+O** loads a set back in to extend later, or to disable a bad point instead of deleting
-it. Then re-run, and check the overlays in `OUTPUT/2P/registered/QualityCheck/` before
-committing to a full run;
-[`--check_alignment`](landmarks.md#settling-the-alignment-before-committing-to-a-full-run)
-exists for that.
+**File > Export landmarks**, or **Ctrl+S**, to the exact path the pipeline printed.
+[landmarks.md](landmarks.md#what-the-pipeline-asks-for) has the filename pattern and the
+columns. **Ctrl+O** loads a set back in, so you can extend it later or disable a bad point
+instead of deleting it.
+
+Then re-run and look at the overlays in `OUTPUT/2P/registered/QualityCheck/` before you commit
+to a full run.
+[`--check_alignment`](landmarks.md#settling-the-alignment-before-committing-to-a-full-run) stops
+the pipeline right after this step so you can.
 
 <!-- SCREENSHOT 08: the export dialog with the pipeline's prompted filename pasted in. -->
 
@@ -161,7 +171,7 @@ exists for that.
 | **shift+left-drag** | place a pair in one gesture |
 | **Ctrl+Z** / **Ctrl+Y** | undo / redo a landmark change |
 | **T** | toggle warped / raw moving image |
-| **X/Y/Z** + arrows | rotate the view; **shift+X/Y/Z** snaps to a plane |
+| **X/Y/Z** + arrows | rotate the view; **shift+X/Y/Z** rotates to that plane |
 | **mouse wheel**, **,** / **.** | move through z |
 | **Q** / **W** / **E** / **R** | sync other / sync active / centre on nearest landmark / reset |
 | **Ctrl+D** / **Ctrl+Shift+D** | next / previous landmark |
