@@ -7,8 +7,8 @@ has to contain.
 
 Landmarks are placed in [Fiji](https://fiji.sc/)'s BigWarp, under
 **Plugins > BigDataViewer > Big Warp**. If you have not driven BigWarp before, work through
-[bigwarp_walkthrough.md](bigwarp_walkthrough.md) first: what order to do things in, the keys
-that matter, and why the tissue gets squared up before you look for a single landmark.
+[BigWarp_Tips.md](BigWarp_Tips.md) first: what order to do things in, the keys that matter, and
+why the tissue gets squared up before you look for a single landmark.
 
 ## What the pipeline asks for
 
