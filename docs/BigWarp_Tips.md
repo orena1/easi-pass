@@ -11,7 +11,7 @@ BigWarp, **F1** prints the bindings for your installed version. To practise befo
 for real, the demo ships both images and a finished 18-point set
 ([demo/README.md](../demo/README.md)).
 
-## What you are doing
+## What landmarking does
 
 You are not moving an image. You are telling BigWarp that this point here is that point there,
 one pair at a time, and it fits a thin-plate spline through the pairs. What you see on screen is
@@ -21,17 +21,17 @@ until you export, so a point costs nothing: place it, look, move it.
 | Panel | Image | Which file |
 |---|---|---|
 | **Moving** | your 2P reference plane, 2D | `.../OUTPUT/2P/registered/hires_stitched_plane0_rotated.tiff` |
-| **Target** (fixed) | the reference FISH round, 3D | `.../HCR/{sample}_HCR01.tiff` |
+| **Target** (fixed) | the reference HCR FISH round, 3D | `.../HCR/{sample}_HCR01.tiff` |
 
 The pipeline prints both paths when it pauses. Open them in Fiji, launch
 **Plugins > BigDataViewer > Big Warp**, and assign them in that order.
 
 <!-- SCREENSHOT 01: Fiji with both demo TIFFs open and the Big Warp selection dialog filled in: moving = plane_0_hires.tiff, target = JS078_demo_HCR01.tiff. -->
 
-## Flips must be fixed before you get here
+## Fix flips before you start
 
 **BigWarp has no mirror or flip.** It rotates, pans, zooms and warps, and that is all. If your
-2P plane is mirrored relative to the FISH volume, landmarking cannot fix it and the run is
+2P plane is mirrored relative to the HCR FISH volume, landmarking cannot fix it and the run is
 wasted.
 
 That is why the pipeline stops on an `ORIENTATION` banner first. Look at the two images it
@@ -57,7 +57,7 @@ image coordinates, so you export the same file however you were looking at it. R
 Every channel at once is unreadable. Put one on each side, matched to a channel that stains the
 same thing. **F3** and **F4** open the visibility dialogs for the moving and target images.
 
-| Moving (2P) | Target (FISH) | What you are matching |
+| Moving (2P) | Target (HCR FISH) | What you are matching |
 |---|---|---|
 | GCaMP | cytoDAPI | cell bodies, overall cytoarchitecture |
 | sparse marker | tdTomato | the few bright labelled cells, unambiguous where present |
@@ -73,7 +73,7 @@ sides until they look comparable to your eye, which is not the same as either on
 
 <!-- SCREENSHOT 03: same target channel at a bad display range (near-black) and after adjustment (structure visible), side by side. -->
 
-## Get your bearings
+## Orient yourself in the volume
 
 Start with the big structures: white matter tracts, ventricle boundaries, an abrupt change in
 cytoarchitecture, the tissue edge. They are too coarse to landmark, but they tell you where in
@@ -94,7 +94,7 @@ sparse-marker ones.
 Choose landmarks by their arrangement, not their brightness. A triangle of three neighbouring
 somata is recognisable in the other modality, and so is a soma tucked into a bend of a vessel.
 The brightest cell in the 2P image usually is not, because nothing makes it the brightest one in
-FISH.
+HCR FISH.
 
 Set the target z for each point individually, at the slice where that cell is in focus. Those z
 values are meant to differ across the field ([landmarks.md](landmarks.md#placing-the-points)).
@@ -151,18 +151,18 @@ export.
 ## Export
 
 **File > Export landmarks**, or **Ctrl+S**, to the exact path the pipeline printed.
-[landmarks.md](landmarks.md#what-the-pipeline-asks-for) has the filename pattern and the
+[landmarks.md](landmarks.md#where-the-file-goes) has the filename pattern and the
 columns. **Ctrl+O** loads a set back in, so you can extend it later or disable a bad point
 instead of deleting it.
 
 Then re-run and look at the overlays in `OUTPUT/2P/registered/QualityCheck/` before you commit
 to a full run.
-[`--check_alignment`](landmarks.md#settling-the-alignment-before-committing-to-a-full-run) stops
+[`--check_alignment`](landmarks.md#checking-the-alignment-first) stops
 the pipeline right after this step so you can.
 
 <!-- SCREENSHOT 08: the export dialog with the pipeline's prompted filename pasted in. -->
 
-## Keys, condensed
+## Key reference
 
 | | |
 |---|---|

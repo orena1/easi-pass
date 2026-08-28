@@ -67,7 +67,7 @@
             diameter: 15          // px
             // "use an accelerator if there is one", not a requirement. Without a GPU this
             // still runs, just slower; set false to pin it to the CPU. Already have masks?
-            // See "Bringing your own masks" in the README to skip cellpose entirely.
+            // See docs/masks.md to skip cellpose entirely.
             gpu: true
             flow_threshold: 0.5
             cellprob_threshold: -0.5
