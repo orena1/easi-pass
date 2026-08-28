@@ -81,6 +81,7 @@ easipass/processing_notebooks/HCR_rounds/_ablation_dumps/
 # Internal audit/planning docs. Only user-facing docs are tracked, by exception.
 docs/*.md
 !docs/landmarks.md
+!docs/bigwarp_walkthrough.md
 
 # --- Internal-only files kept on disk but never published ---
 # Lab env dump; notebook import shim (stale module names + hardcoded personal

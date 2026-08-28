@@ -1,21 +1,16 @@
 # EASI-PASS
 
-Align two-photon functional imaging to multi-round in-situ molecular imaging. 
+Match cells between two-photon functional imaging and multi-round in-situ molecular imaging.
 
-EASI-PASS takes a mean image from a functional recording and one or more EASI-FISH confocal
-volumes, segments cells in both, registers them onto each other, matches cells across
-modalities, and writes a per-cell table joining functional identity to molecular readout. It
-also runs without any functional data, registering and matching cells across successive FISH
-rounds alone.
+Give EASI-PASS a mean image from a functional recording and one or more EASI-FISH volumes. It
+segments cells in both, registers them onto each other, matches them across modalities, and
+writes a per-cell table joining functional identity to molecular readout. It also runs on FISH
+rounds alone, with no functional data.
 
-It does not process raw recordings, compute ΔF/F, or stitch image tiles. Those happen
-upstream, and EASI-PASS takes their output as input.
+Not included: processing raw recordings, ΔF/F, tile stitching. Those run upstream, and
+EASI-PASS takes their output as input.
 
-**Getting started:** [What it needs](#what-it-needs) · [Ways to run this](#ways-to-run-this) · [Installation](#installation) · [Start with the demo](#start-with-the-demo) · [Running your own data](#running-your-own-data)
-
-**Using it:** [Bringing your own masks](#bringing-your-own-masks) · [What it does](#what-it-does) · [What you get](#what-you-get) · [The feature table](#the-feature-table) · [Manifest](#manifest)
-
-**Reference:** [What the pipeline writes](#what-the-pipeline-writes) · [Re-running](#re-running) · [Source layout](#source-layout) · [Citation](#citation)
+[What it needs](#what-it-needs) · [Ways to run this](#ways-to-run-this) · [Installation](#installation) · [Demo](#start-with-the-demo) · [Your own data](#running-your-own-data) · [What it does](#what-it-does) · [What you get](#what-you-get) · [Manifest](#manifest) · [Outputs](#what-the-pipeline-writes) · [Re-running](#re-running) · [Citation](#citation)
 
 ## What it needs
 
@@ -134,7 +129,9 @@ The pipeline is developed and tested on Linux, so that is where it is known to r
 The CUDA libraries are Linux-only, so a GPU only helps there.
 
 Cross-modal runs also need [Fiji](https://fiji.sc/)'s BigWarp for placing landmarks
-(Plugins > BigDataViewer > Big Warp). See [docs/landmarks.md](docs/landmarks.md).
+(Plugins > BigDataViewer > Big Warp). See [docs/landmarks.md](docs/landmarks.md) for what the
+pipeline needs, and [docs/bigwarp_walkthrough.md](docs/bigwarp_walkthrough.md) for how to drive
+BigWarp itself.
 
 ### Do you need a GPU?
 
