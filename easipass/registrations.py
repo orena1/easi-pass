@@ -1196,11 +1196,18 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     SEARCH_Z_MAX  = reg_params.get('search_z_max',  8)
 
     # Edge-correction knobs for per-tile warp synthesis. Defaults preserve the
-    # historical "snap to zero outside data envelope" behavior; set
-    # use_nn_fallback=True to bleed to nearest-tile shift instead, eliminating
-    # the rigid warp front at the FOV edge (Voronoi seams are bounded by the
-    # per-tile IoU + MAD validation the accepted tiles already passed).
-    USE_NN_FALLBACK        = bool(reg_params.get('use_nn_fallback', False))
+    # historical "snap to zero outside data envelope" behavior.
+    if reg_params.get('use_nn_fallback', False):
+        raise NotImplementedError(
+            "params.twop_to_hcr_registration.use_nn_fallback is no longer supported.\n"
+            "It blended the warp toward a nearest-tile field outside the accepted-tile "
+            "envelope. NearestNDInterpolator is piecewise constant, so the Voronoi seams "
+            "between tiles became step discontinuities and the field folded in thousands "
+            "of places, tearing any mask that crossed one.\n"
+            "Every manifest that set this key already set it to false (see the note in "
+            "examples/SRC104.hjson, recording the cascade reverting on SRC104 plane 1).\n"
+            "Remove the key, or set it to false to keep the manifest as documentation."
+        )
     DATA_SIGMA_MULT        = float(reg_params.get('data_sigma_mult', 1.0))
     BORDER_DECAY_MULT      = float(reg_params.get('border_decay_mult', 2.0))
     BORDER_WEIGHT_FLOOR    = float(reg_params.get('border_weight_floor', 0.0))
@@ -1649,7 +1656,6 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
                 min_iou=MIN_IOU_LOCAL, min_gain=MIN_GAIN_LOCAL,
                 border_anchor_spacing=td['border_spacing'],
                 smoothing=td['rbf_smoothing'],
-                use_nn_fallback=USE_NN_FALLBACK,
                 data_sigma_mult=DATA_SIGMA_MULT,
                 border_decay_mult=BORDER_DECAY_MULT,
                 border_weight_floor=BORDER_WEIGHT_FLOOR,
@@ -1900,7 +1906,6 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             # Metadata
             erosion=EROSION,
             erosion_hcr=EROSION_HCR,
-            use_nn_fallback=np.array(USE_NN_FALLBACK),
             data_sigma_mult=DATA_SIGMA_MULT,
             border_decay_mult=BORDER_DECAY_MULT,
             border_weight_floor=BORDER_WEIGHT_FLOOR,
