@@ -6,7 +6,8 @@ from tqdm.auto import tqdm
 from tifffile import TiffFile
 from scipy.fft import rfft2, irfft2, next_fast_len
 from scipy.interpolate import RBFInterpolator, griddata, LinearNDInterpolator, NearestNDInterpolator
-from scipy.ndimage import map_coordinates, rotate, binary_dilation, binary_erosion, distance_transform_edt
+from scipy.ndimage import (map_coordinates, rotate, binary_dilation, binary_erosion,
+                           distance_transform_edt, find_objects, mean as ndi_mean)
 from scipy.spatial import ConvexHull
 from skimage.transform import resize, AffineTransform, warp
 from skimage.registration import phase_cross_correlation
@@ -423,6 +424,56 @@ def apply_shift_fields(mask_2d, dy_field, dx_field, order=0, return_labels=False
     else:
         # Return binary (for IoU calculation)
         return shifted > 0.5
+
+def reposition_rigid(labels_2d, dy_field, dx_field):
+    """Translate each labelled cell by one vector instead of resampling it.
+
+    apply_shift_fields pulls the label image through the field, so a region's area comes
+    out scaled by 1/|det(I - grad d)|. Wherever the field locally expands, every mask
+    inside expands with it, and where it folds the mask tears. That deformation is not a
+    measurement: the field is interpolated from tile centres spaced tile_size apart, so
+    nothing it says at within-cell scale is supported by data.
+
+    Here each cell takes the field averaged over its own footprint -- exactly the
+    displacement of its centroid for a locally affine field, and steadier than a
+    single-pixel probe -- rounded to whole pixels so no resampling happens at all. Area,
+    aspect and single-piece connectivity are preserved by construction. Cells land where
+    the cascade put them, to within half a pixel.
+
+    Contested pixels go to the nearer centroid, which is order-independent, so the result
+    does not depend on label numbering.
+
+    See easipass/processing_notebooks/cascade_mask_distortion.ipynb for the measurements.
+    """
+    ids = np.unique(labels_2d)
+    ids = ids[ids > 0]
+    if len(ids) == 0:
+        return labels_2d.copy()
+
+    disp = np.stack([ndi_mean(dy_field, labels_2d, list(ids)),
+                     ndi_mean(dx_field, labels_2d, list(ids))], axis=1)
+
+    h, w = labels_2d.shape
+    out = np.zeros((h, w), labels_2d.dtype)
+    claim = np.full((h, w), np.inf, np.float32)
+    objs = find_objects(labels_2d)
+    for i, cid in enumerate(ids):
+        sl = objs[cid - 1] if cid - 1 < len(objs) else None
+        if sl is None or not np.isfinite(disp[i]).all():
+            continue
+        ys, xs = np.nonzero(labels_2d[sl] == cid)
+        y = ys + sl[0].start + int(round(disp[i, 0]))
+        x = xs + sl[1].start + int(round(disp[i, 1]))
+        keep = (y >= 0) & (y < h) & (x >= 0) & (x < w)
+        y, x = y[keep], x[keep]
+        if len(y) == 0:
+            continue
+        d2 = (y - y.mean()) ** 2 + (x - x.mean()) ** 2
+        win = d2 < claim[y, x]
+        out[y[win], x[win]] = cid
+        claim[y[win], x[win]] = d2[win]
+    return out
+
 
 def read_tiff_resolution(tiff_path):
     """Return [x, y, z] um/px from ImageJ TIFF metadata, or None if unreadable.

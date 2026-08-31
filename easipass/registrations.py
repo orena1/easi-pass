@@ -21,7 +21,7 @@ try:
         # Existing functions (still used by other workflows)
         load_landmarks, build_z_map, tps_warp_2p_to_hcr, erode_labels,
         sample_hcr_binary_at_zmap, compute_iou, compute_containment, apply_shift_fields,
-        shift_2d, rotate_2d,
+        shift_2d, rotate_2d, reposition_rigid,
         register_lowres_to_hires_single_plane, apply_lowres_to_hires_transform,
         refine_lowres_to_hires_with_tiles, refine_lowres_to_hires_with_flow,
         prompt_overwrite_per_plane,
@@ -37,7 +37,7 @@ except ImportError:
     from registrations_utils import (
         load_landmarks, build_z_map, tps_warp_2p_to_hcr, erode_labels,
         sample_hcr_binary_at_zmap, compute_iou, compute_containment, apply_shift_fields,
-        shift_2d, rotate_2d,
+        shift_2d, rotate_2d, reposition_rigid,
         register_lowres_to_hires_single_plane, apply_lowres_to_hires_transform,
         refine_lowres_to_hires_with_tiles, refine_lowres_to_hires_with_flow,
         prompt_overwrite_per_plane,
@@ -1213,6 +1213,17 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     BORDER_WEIGHT_FLOOR    = float(reg_params.get('border_weight_floor', 0.0))
     DISABLE_BORDER_ANCHORS = bool(reg_params.get('disable_border_anchors', False))
 
+    # How the composed warp is applied to the output labels. The dense pull-resample
+    # deforms every mask by 1/|det(I - grad d)|, which is a side effect of the
+    # resampling rather than anything the cascade measured: the field is interpolated
+    # from tile centres spaced tile_size apart, so it carries no information at
+    # within-cell scale. 'rigid' translates each cell by the field averaged over its own
+    # footprint instead, preserving area, aspect and connectivity. Alignment and scoring
+    # keep using the dense field either way; this only governs the labels written out.
+    # Measured across 16 PBN planes in
+    # easipass/processing_notebooks/cascade_mask_distortion.ipynb.
+    RIGID_OUTPUT_MASKS = bool(reg_params.get('rigid_output_masks', False))
+
     # Print configuration (compact)
     rprint(f"[dim]Parameters: erosion={EROSION}, Z={Z_RANGE_GLOBAL}, "
           f"XY={XY_MAX_GLOBAL}px, hull_margin={HULL_MARGIN}, "
@@ -1791,8 +1802,14 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
         # ---- Apply final composed displacement to NON-ERODED labels ----
         # Eroded masks were used for alignment; non-eroded for output
         twop_global_noneroded = shift_2d(twop_warped, g_dy, g_dx)
-        twop_final_labels = apply_shift_fields(twop_global_noneroded, cumulative_dy, cumulative_dx,
-                                                return_labels=True)
+        if RIGID_OUTPUT_MASKS:
+            twop_final_labels = reposition_rigid(twop_global_noneroded,
+                                                 cumulative_dy, cumulative_dx)
+            rprint("  [dim]Output masks: rigid reposition (one vector per cell, "
+                   "no resampling)[/dim]")
+        else:
+            twop_final_labels = apply_shift_fields(twop_global_noneroded, cumulative_dy,
+                                                   cumulative_dx, return_labels=True)
 
         # Final z_map in full HCR space
         z_map_base_full = build_z_quad_blend(
@@ -1906,6 +1923,7 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             # Metadata
             erosion=EROSION,
             erosion_hcr=EROSION_HCR,
+            rigid_output_masks=np.array(RIGID_OUTPUT_MASKS),
             data_sigma_mult=DATA_SIGMA_MULT,
             border_decay_mult=BORDER_DECAY_MULT,
             border_weight_floor=BORDER_WEIGHT_FLOOR,
