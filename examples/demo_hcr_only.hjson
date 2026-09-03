@@ -16,6 +16,8 @@
                 {
                     round: "01"
                     channels: ["DAPI", "PROBE_A", "PROBE_B"]   // DAPI must be first
+                    // Optional, and only a fallback. The volume's own calibration is read
+                    // from the file and always wins; this is used when the file has none.
                     resolution: [1.515, 1.515, 5.0]            // x, y, z microns per voxel
                 }
                 {
@@ -65,7 +67,7 @@
             diameter: 15          // px
             // "use an accelerator if there is one", not a requirement. Without a GPU this
             // still runs, just slower; set false to pin it to the CPU. Already have masks?
-            // See "Bringing your own masks" in the README to skip cellpose entirely.
+            // See docs/masks.md to skip cellpose entirely.
             gpu: true
             flow_threshold: 0.5
             cellprob_threshold: -0.5
