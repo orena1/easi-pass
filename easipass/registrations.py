@@ -21,7 +21,7 @@ try:
         # Existing functions (still used by other workflows)
         load_landmarks, build_z_map, tps_warp_2p_to_hcr, erode_labels,
         sample_hcr_binary_at_zmap, compute_iou, compute_containment, apply_shift_fields,
-        shift_2d, rotate_2d,
+        shift_2d, rotate_2d, reposition_rigid,
         register_lowres_to_hires_single_plane, apply_lowres_to_hires_transform,
         refine_lowres_to_hires_with_tiles, refine_lowres_to_hires_with_flow,
         prompt_overwrite_per_plane,
@@ -37,7 +37,7 @@ except ImportError:
     from registrations_utils import (
         load_landmarks, build_z_map, tps_warp_2p_to_hcr, erode_labels,
         sample_hcr_binary_at_zmap, compute_iou, compute_containment, apply_shift_fields,
-        shift_2d, rotate_2d,
+        shift_2d, rotate_2d, reposition_rigid,
         register_lowres_to_hires_single_plane, apply_lowres_to_hires_transform,
         refine_lowres_to_hires_with_tiles, refine_lowres_to_hires_with_flow,
         prompt_overwrite_per_plane,
@@ -1196,15 +1196,33 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     SEARCH_Z_MAX  = reg_params.get('search_z_max',  8)
 
     # Edge-correction knobs for per-tile warp synthesis. Defaults preserve the
-    # historical "snap to zero outside data envelope" behavior; set
-    # use_nn_fallback=True to bleed to nearest-tile shift instead, eliminating
-    # the rigid warp front at the FOV edge (Voronoi seams are bounded by the
-    # per-tile IoU + MAD validation the accepted tiles already passed).
-    USE_NN_FALLBACK        = bool(reg_params.get('use_nn_fallback', False))
+    # historical "snap to zero outside data envelope" behavior.
+    if reg_params.get('use_nn_fallback', False):
+        raise NotImplementedError(
+            "params.twop_to_hcr_registration.use_nn_fallback is no longer supported.\n"
+            "It blended the warp toward a nearest-tile field outside the accepted-tile "
+            "envelope. NearestNDInterpolator is piecewise constant, so the Voronoi seams "
+            "between tiles became step discontinuities and the field folded in thousands "
+            "of places, tearing any mask that crossed one. It was recorded reverting "
+            "the cascade on SRC104 plane 1.\n"
+            "Remove the key from your manifest; the taper it used to replace is now "
+            "always in effect."
+        )
     DATA_SIGMA_MULT        = float(reg_params.get('data_sigma_mult', 1.0))
     BORDER_DECAY_MULT      = float(reg_params.get('border_decay_mult', 2.0))
     BORDER_WEIGHT_FLOOR    = float(reg_params.get('border_weight_floor', 0.0))
     DISABLE_BORDER_ANCHORS = bool(reg_params.get('disable_border_anchors', False))
+
+    # How the composed warp is applied to the output labels. The dense pull-resample
+    # deforms every mask by 1/|det(I - grad d)|, which is a side effect of the
+    # resampling rather than anything the cascade measured: the field is interpolated
+    # from tile centres spaced tile_size apart, so it carries no information at
+    # within-cell scale. 'rigid' translates each cell by the field averaged over its own
+    # footprint instead, preserving area, aspect and connectivity. Alignment and scoring
+    # keep using the dense field either way; this only governs the labels written out.
+    # Measured across 16 PBN planes; per-plane numbers in
+    # easipass/processing_notebooks/cascade_distortion_cohort.csv.
+    RIGID_OUTPUT_MASKS = bool(reg_params.get('rigid_output_masks', False))
 
     # Print configuration (compact)
     rprint(f"[dim]Parameters: erosion={EROSION}, Z={Z_RANGE_GLOBAL}, "
@@ -1649,7 +1667,6 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
                 min_iou=MIN_IOU_LOCAL, min_gain=MIN_GAIN_LOCAL,
                 border_anchor_spacing=td['border_spacing'],
                 smoothing=td['rbf_smoothing'],
-                use_nn_fallback=USE_NN_FALLBACK,
                 data_sigma_mult=DATA_SIGMA_MULT,
                 border_decay_mult=BORDER_DECAY_MULT,
                 border_weight_floor=BORDER_WEIGHT_FLOOR,
@@ -1785,8 +1802,14 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
         # ---- Apply final composed displacement to NON-ERODED labels ----
         # Eroded masks were used for alignment; non-eroded for output
         twop_global_noneroded = shift_2d(twop_warped, g_dy, g_dx)
-        twop_final_labels = apply_shift_fields(twop_global_noneroded, cumulative_dy, cumulative_dx,
-                                                return_labels=True)
+        if RIGID_OUTPUT_MASKS:
+            twop_final_labels = reposition_rigid(twop_global_noneroded,
+                                                 cumulative_dy, cumulative_dx)
+            rprint("  [dim]Output masks: rigid reposition (one vector per cell, "
+                   "no resampling)[/dim]")
+        else:
+            twop_final_labels = apply_shift_fields(twop_global_noneroded, cumulative_dy,
+                                                   cumulative_dx, return_labels=True)
 
         # Final z_map in full HCR space
         z_map_base_full = build_z_quad_blend(
@@ -1900,7 +1923,7 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             # Metadata
             erosion=EROSION,
             erosion_hcr=EROSION_HCR,
-            use_nn_fallback=np.array(USE_NN_FALLBACK),
+            rigid_output_masks=np.array(RIGID_OUTPUT_MASKS),
             data_sigma_mult=DATA_SIGMA_MULT,
             border_decay_mult=BORDER_DECAY_MULT,
             border_weight_floor=BORDER_WEIGHT_FLOOR,

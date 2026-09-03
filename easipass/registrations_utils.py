@@ -6,7 +6,8 @@ from tqdm.auto import tqdm
 from tifffile import TiffFile
 from scipy.fft import rfft2, irfft2, next_fast_len
 from scipy.interpolate import RBFInterpolator, griddata, LinearNDInterpolator, NearestNDInterpolator
-from scipy.ndimage import map_coordinates, rotate, binary_dilation, binary_erosion, distance_transform_edt
+from scipy.ndimage import (map_coordinates, rotate, binary_dilation, binary_erosion,
+                           distance_transform_edt, find_objects, mean as ndi_mean)
 from scipy.spatial import ConvexHull
 from skimage.transform import resize, AffineTransform, warp
 from skimage.registration import phase_cross_correlation
@@ -423,6 +424,57 @@ def apply_shift_fields(mask_2d, dy_field, dx_field, order=0, return_labels=False
     else:
         # Return binary (for IoU calculation)
         return shifted > 0.5
+
+def reposition_rigid(labels_2d, dy_field, dx_field):
+    """Translate each labelled cell by one vector instead of resampling it.
+
+    apply_shift_fields pulls the label image through the field, so a region's area comes
+    out scaled by 1/|det(I - grad d)|. Wherever the field locally expands, every mask
+    inside expands with it, and where it folds the mask tears. That deformation is not a
+    measurement: the field is interpolated from tile centres spaced tile_size apart, so
+    nothing it says at within-cell scale is supported by data.
+
+    Here each cell takes the field averaged over its own footprint -- exactly the
+    displacement of its centroid for a locally affine field, and steadier than a
+    single-pixel probe -- rounded to whole pixels so no resampling happens at all. Area,
+    aspect and single-piece connectivity are preserved by construction. Cells land where
+    the cascade put them, to within half a pixel.
+
+    Contested pixels go to the nearer centroid, which is order-independent, so the result
+    does not depend on label numbering.
+
+    Per-plane measurements are in easipass/processing_notebooks/cascade_distortion_cohort.csv
+    (area_p99, area_max and torn for this path vs the dense resample, per cascade stage).
+    """
+    ids = np.unique(labels_2d)
+    ids = ids[ids > 0]
+    if len(ids) == 0:
+        return labels_2d.copy()
+
+    disp = np.stack([ndi_mean(dy_field, labels_2d, list(ids)),
+                     ndi_mean(dx_field, labels_2d, list(ids))], axis=1)
+
+    h, w = labels_2d.shape
+    out = np.zeros((h, w), labels_2d.dtype)
+    claim = np.full((h, w), np.inf, np.float32)
+    objs = find_objects(labels_2d)
+    for i, cid in enumerate(ids):
+        sl = objs[cid - 1] if cid - 1 < len(objs) else None
+        if sl is None or not np.isfinite(disp[i]).all():
+            continue
+        ys, xs = np.nonzero(labels_2d[sl] == cid)
+        y = ys + sl[0].start + int(round(disp[i, 0]))
+        x = xs + sl[1].start + int(round(disp[i, 1]))
+        keep = (y >= 0) & (y < h) & (x >= 0) & (x < w)
+        y, x = y[keep], x[keep]
+        if len(y) == 0:
+            continue
+        d2 = (y - y.mean()) ** 2 + (x - x.mean()) ** 2
+        win = d2 < claim[y, x]
+        out[y[win], x[win]] = cid
+        claim[y[win], x[win]] = d2[win]
+    return out
+
 
 def read_tiff_resolution(tiff_path):
     """Return [x, y, z] um/px from ImageJ TIFF metadata, or None if unreadable.
@@ -2253,11 +2305,6 @@ def run_local_tile_ransac(twop_binary, hcr_3d_bin, z_map, centroids, cell_df,
                           smoothing=50,
                           # Edge-correction knobs forwarded to _synthesize_warp_from_tiles.
                           # Defaults preserve original conservative behavior.
-                          # use_nn_fallback=True eliminates the data-weight "snap to zero"
-                          # outside the accepted-tile envelope by blending to nearest-tile
-                          # shift instead — safe because NN value is bounded by per-tile
-                          # IoU + MAD checks the accepted tiles already passed.
-                          use_nn_fallback=False,
                           data_sigma_mult=1.0,
                           border_decay_mult=2.0,
                           border_weight_floor=0.0,
@@ -2369,7 +2416,6 @@ def run_local_tile_ransac(twop_binary, hcr_3d_bin, z_map, centroids, cell_df,
         tile_results, ny, nx, tile_size,
         border_anchor_spacing=border_anchor_spacing,
         smoothing=smoothing,
-        use_nn_fallback=use_nn_fallback,
         data_sigma_mult=data_sigma_mult,
         border_decay_mult=border_decay_mult,
         border_weight_floor=border_weight_floor,
@@ -2387,7 +2433,6 @@ def _synthesize_warp_from_tiles(
     mad_floor=1.0,
     border_decay_mult=2.0,
     data_sigma_mult=1.0,
-    use_nn_fallback=False,
     disable_border_anchors=False,
     disable_data_weight=False,
     border_weight_floor=0.0,
@@ -2405,8 +2450,6 @@ def _synthesize_warp_from_tiles(
       - border_decay_mult: decay_radius = tile_size * border_decay_mult
                            (linear fade of border-anchor value to 0 at that radius)
       - data_sigma_mult: post-RBF Gaussian fade sigma = tile_size * data_sigma_mult
-      - use_nn_fallback: far-from-data regions fall back to nearest-tile value
-                        instead of 0 (blend = data_weight*RBF + (1-data_weight)*NN)
       - disable_border_anchors: skip adding border anchor points
       - disable_data_weight: skip final data-weight multiply
       - border_weight_floor: minimum weight applied to border anchors
@@ -2491,21 +2534,28 @@ def _synthesize_warp_from_tiles(
     dz_f = _fields[:, 2].reshape(ny, nx)
 
     if not disable_data_weight:
+        # Taper the field to zero away from the tiles, so the RBF cannot extrapolate
+        # wildly past its data. Note what this costs: outside the tiles it ramps the
+        # displacement from its full value to zero over roughly one tile size, and a
+        # region's area comes out scaled by 1/|det(I - grad d)|, so masks in that band
+        # stretch by about 1/(1 - |d|/tile_size). That is a pole, not a slope -- it runs
+        # away as |d| approaches the tile size, and sigma IS the tile size, so the
+        # smallest cascade stage is the most exposed. The rim is also under-corrected,
+        # since what the tiles asked for is what gets tapered away.
+        #
+        # An earlier use_nn_fallback option blended toward a nearest-tile field here
+        # instead. It was removed: NearestNDInterpolator is piecewise constant, so the
+        # Voronoi seams become step discontinuities and the field folds in thousands of
+        # places, and was recorded reverting the cascade on SRC104 plane 1. Per-plane
+        # measurements are in
+        # easipass/processing_notebooks/cascade_distortion_cohort.csv.
         from scipy.spatial import cKDTree
         tree = cKDTree(acc_centers)
         dist_to_data = tree.query(pts)[0].reshape(ny, nx)
         sigma = float(tile_size) * data_sigma_mult
         data_weight = np.exp(-dist_to_data**2 / (2 * sigma**2))
-        if use_nn_fallback:
-            nn_dy_full = NearestNDInterpolator(acc_centers, [t['dy'] for t in accepted])(pts).reshape(ny, nx)
-            nn_dx_full = NearestNDInterpolator(acc_centers, [t['dx'] for t in accepted])(pts).reshape(ny, nx)
-            nn_dz_full = NearestNDInterpolator(acc_centers, [t['dz'] for t in accepted])(pts).reshape(ny, nx)
-            dy_f = data_weight * dy_f + (1 - data_weight) * nn_dy_full
-            dx_f = data_weight * dx_f + (1 - data_weight) * nn_dx_full
-            dz_f = data_weight * dz_f + (1 - data_weight) * nn_dz_full
-        else:
-            dy_f *= data_weight
-            dx_f *= data_weight
-            dz_f *= data_weight
+        dy_f *= data_weight
+        dx_f *= data_weight
+        dz_f *= data_weight
 
     return dy_f, dx_f, dz_f, tile_results
