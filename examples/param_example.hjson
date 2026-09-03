@@ -72,7 +72,16 @@ twop_to_hcr_registration:{
     // yourself downstream (high candidate IoU + low neighborhood IoU flags a
     // spurious single-cell overlap in a partially-aligned region).
     "report_neighborhood_iou":true,     // set false to omit the column
-    "neighborhood_window_px":50         // XY window side length (px)
+    "neighborhood_window_px":50,        // XY window side length (px)
+    // How the composed warp reaches the output labels. Default false pulls the label
+    // image through the dense field, which scales every mask by 1/|det(I - grad d)| --
+    // a side effect of resampling, not something the cascade measured, since the field
+    // is interpolated from tile centres and carries no within-cell detail. true gives
+    // each cell the field averaged over its own footprint and moves it by that one
+    // vector, so area, aspect and connectivity survive. Alignment and scoring use the
+    // dense field either way. Per-plane numbers in
+    // easipass/processing_notebooks/cascade_distortion_cohort.csv.
+    "rigid_output_masks":false          // true to translate masks instead of resampling them
 }
 
 // HCR round-to-round cell matching: a two-stage hybrid that re-pairs cells across

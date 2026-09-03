@@ -1203,10 +1203,10 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             "It blended the warp toward a nearest-tile field outside the accepted-tile "
             "envelope. NearestNDInterpolator is piecewise constant, so the Voronoi seams "
             "between tiles became step discontinuities and the field folded in thousands "
-            "of places, tearing any mask that crossed one.\n"
-            "Every manifest that set this key already set it to false (see the note in "
-            "examples/SRC104.hjson, recording the cascade reverting on SRC104 plane 1).\n"
-            "Remove the key, or set it to false to keep the manifest as documentation."
+            "of places, tearing any mask that crossed one. It was recorded reverting "
+            "the cascade on SRC104 plane 1.\n"
+            "Remove the key from your manifest; the taper it used to replace is now "
+            "always in effect."
         )
     DATA_SIGMA_MULT        = float(reg_params.get('data_sigma_mult', 1.0))
     BORDER_DECAY_MULT      = float(reg_params.get('border_decay_mult', 2.0))
@@ -1220,8 +1220,8 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     # within-cell scale. 'rigid' translates each cell by the field averaged over its own
     # footprint instead, preserving area, aspect and connectivity. Alignment and scoring
     # keep using the dense field either way; this only governs the labels written out.
-    # Measured across 16 PBN planes in
-    # easipass/processing_notebooks/cascade_mask_distortion.ipynb.
+    # Measured across 16 PBN planes; per-plane numbers in
+    # easipass/processing_notebooks/cascade_distortion_cohort.csv.
     RIGID_OUTPUT_MASKS = bool(reg_params.get('rigid_output_masks', False))
 
     # Print configuration (compact)

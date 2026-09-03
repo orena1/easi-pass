@@ -443,7 +443,8 @@ def reposition_rigid(labels_2d, dy_field, dx_field):
     Contested pixels go to the nearer centroid, which is order-independent, so the result
     does not depend on label numbering.
 
-    See easipass/processing_notebooks/cascade_mask_distortion.ipynb for the measurements.
+    Per-plane measurements are in easipass/processing_notebooks/cascade_distortion_cohort.csv
+    (area_p99, area_max and torn for this path vs the dense resample, per cascade stage).
     """
     ids = np.unique(labels_2d)
     ids = ids[ids > 0]
@@ -2545,9 +2546,9 @@ def _synthesize_warp_from_tiles(
         # An earlier use_nn_fallback option blended toward a nearest-tile field here
         # instead. It was removed: NearestNDInterpolator is piecewise constant, so the
         # Voronoi seams become step discontinuities and the field folds in thousands of
-        # places. Every manifest that set it had already turned it off (see the note in
-        # examples/SRC104.hjson). Measurements in
-        # easipass/processing_notebooks/cascade_mask_distortion.ipynb.
+        # places, and was recorded reverting the cascade on SRC104 plane 1. Per-plane
+        # measurements are in
+        # easipass/processing_notebooks/cascade_distortion_cohort.csv.
         from scipy.spatial import cKDTree
         tree = cKDTree(acc_centers)
         dist_to_data = tree.query(pts)[0].reshape(ny, nx)
