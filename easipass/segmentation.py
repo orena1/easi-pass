@@ -24,8 +24,6 @@ from tifffile import imread as tif_imread
 from tifffile import imwrite as tif_imsave
 from tifffile import TiffFile
 from tqdm.auto import tqdm
-from scipy.spatial import ConvexHull
-from scipy.interpolate import LinearNDInterpolator
 try:
     from .registrations import verify_rounds  # Relative import (running as part of a package)
     from .functional import get_number_of_suite2p_planes
@@ -254,6 +252,35 @@ def _find_user_masks(directory, stem):
     return None
 
 
+def _announce_masks_in_place(mask_path, expected_shape, what):
+    """Name the mask file a step is about to reuse, and check it still fits.
+
+    Cellpose writes its own output under the same names a user is invited to supply, so
+    on a re-run there is no way to tell which one is on disk -- and no need to, since
+    reusing it is right either way. What matters is not being silent about it: on a first
+    run anything here was put here by hand, and the old message ("exists") hid both the
+    path and the fact that a supplied file was being used at all.
+
+    The shape comes from the TIFF header, so this stays free on a 1 GB mask. A mismatch is
+    always wrong, but it is reported rather than raised here: the run has not yet spent
+    anything, and the steps that consume these masks fail with the full explanation.
+    """
+    shape = None
+    if mask_path.suffix.lower() in ('.tif', '.tiff'):
+        try:
+            with TiffFile(str(mask_path)) as tf:
+                shape = tuple(tf.series[0].shape)
+        except Exception:
+            shape = None
+    size_mb = mask_path.stat().st_size / 1e6
+    rprint(f"  [green]{what}: using masks already in place[/green] — {mask_path.name} "
+           f"({size_mb:,.0f} MB){f', {shape}' if shape else ''}")
+    if shape is not None and expected_shape is not None and shape != tuple(expected_shape):
+        rprint(f"    [yellow]note: these masks are {shape} but the image they describe is "
+               f"{tuple(expected_shape)} — the step that reads them will stop and say so. "
+               f"Delete {mask_path.name} to segment again.[/yellow]")
+
+
 def _read_user_masks(path):
     """Read a label array from any of the accepted mask forms.
 
@@ -464,6 +491,13 @@ def run_cellpose(full_manifest):
         mov = reference_round if HCR_round == reference_round['round'] else round_to_rounds[HCR_round]
         source_path = mov['image_path']
         if output_path.exists():
+            # This is also the name the docs invite you to drop your own masks under, so
+            # on a first run this branch IS the bring-your-own path. Say which file.
+            with TiffFile(str(source_path)) as tf:
+                raw_shape = tf.series[0].shape
+            _announce_masks_in_place(
+                output_path, tuple(s for i, s in enumerate(raw_shape) if i != 1),
+                round_folder_name)
             skipped.append(round_folder_name)
             continue
 
@@ -487,9 +521,12 @@ def run_cellpose(full_manifest):
 
         to_process.append((round_folder_name, source_path, output_path))
 
-    # Print summary
+    # Print summary. Each reused round has already named its own file above, so this only
+    # has to say that nothing needs segmenting -- "exist" on its own used to be the entire
+    # report, which read like pipeline output even when every mask had been supplied.
     if not to_process:
-        rprint(f"[dim]HCR cellpose: all {len(all_rounds)} rounds exist[/dim]")
+        rprint(f"[dim]HCR cellpose: nothing to segment, all {len(all_rounds)} rounds "
+               f"already have masks[/dim]")
         return
 
     rprint(f"HCR cellpose: processing {len(to_process)}/{len(all_rounds)} rounds")
@@ -590,7 +627,20 @@ def extract_2p_cellpose_masks(full_manifest: dict, session: dict):
     tiff_path = cellpose_path / f'lowres_meanImg_C0_plane{current_plane}.tiff'
 
     if twop_cellpose_file.exists():
-        rprint(f"[dim]2P cellpose plane {current_plane}: exists[/dim]")
+        rprint(f"  [green]2P plane {current_plane}: using masks already in place[/green] — "
+               f"{twop_cellpose_file.name}")
+        # _seg.npy is read in preference to the _masks.tiff beside it, so masks dropped in
+        # after a run that already segmented are ignored. That is the one case nothing
+        # else notices, and mtime is enough to spot it -- the same test the merged feature
+        # tables already use. Reported, not acted on: re-deriving here would discard a
+        # hand-corrected _seg.npy, which is also a file someone may have worked on.
+        newer = [p for p in (cellpose_path / f'lowres_meanImg_C0_plane{current_plane}{sfx}'
+                             for sfx in ('_masks.tiff', '_masks.tif', '_masks.npy'))
+                 if p.exists() and p.stat().st_mtime > twop_cellpose_file.stat().st_mtime]
+        for p in newer:
+            rprint(f"    [yellow]{p.name} is newer than {twop_cellpose_file.name} and is "
+                   f"NOT being used. If those are masks you just supplied, delete "
+                   f"{twop_cellpose_file.name} (see docs/masks.md).[/yellow]")
         return twop_cellpose_file
 
     if not tiff_path.exists():
@@ -841,22 +891,14 @@ def extract_probe_intensity(full_manifest):
     all_rounds = register_rounds + [reference_round['round']]
 
     def _stack_source(HCR_round, round_folder_name):
-        # Intensities are measured on the acquired (un-warped) round image, so the masks MUST be
-        # that round's NATIVE-frame masks -- not the ref-warped {round_folder}_masks.tiff. On mice
-        # whose rounds were acquired at different dims (e.g. cp4 SRC110/JS082: HCR02 3624x3215 vs
-        # HCR01 1942x1944) the warped masks have the ref shape, which != the native image -> the
-        # `raw_image[:,0].shape == masks.shape` assert below fires. Native masks are written as
-        # HCR{N}_native_masks.tiff; fall back to the canonical name when absent (older mice where
-        # native == ref shape, so the pairing was harmless).
+        # Intensities are measured on the acquired (un-warped) round image, so the masks must
+        # be in that same acquired frame. cellpose/ is where those live, for every round
+        # including the reference; the reference-warped copies are in cellpose_aligned/ and
+        # would be the wrong grid here. The shape assert below is what catches a mix-up.
         cellpose = output_root(full_manifest) / 'HCR' / 'cellpose'
-        if HCR_round == reference_round['round']:
-            mov = reference_round
-            masks = cellpose / f"{round_folder_name}_masks.tiff"   # ref isn't warped: canonical IS native
-        else:
-            mov = round_to_rounds[HCR_round]
-            native = cellpose / f"HCR{HCR_round}_native_masks.tiff"
-            masks = native if native.exists() else cellpose / f"{round_folder_name}_masks.tiff"
-        return Path(mov['image_path']), masks
+        mov = (reference_round if HCR_round == reference_round['round']
+               else round_to_rounds[HCR_round])
+        return Path(mov['image_path']), cellpose / f"{round_folder_name}_masks.tiff"
 
     # Check which rounds need processing
     to_process = []
@@ -930,7 +972,20 @@ def extract_probe_intensity(full_manifest):
         # Load images and verify sizes
         raw_image = tif_imread(full_stack_path)
         masks = tif_imread(full_stack_masks_path)
-        assert raw_image[:,0,:,:].shape == masks.shape
+        # The one place a mask on the wrong grid is still detectable. Say which two files
+        # disagree and what to do, because by here segmentation and registration have both
+        # run and a bare AssertionError sends people looking in the wrong place.
+        if raw_image[:, 0, :, :].shape != masks.shape:
+            raise ValueError(
+                f"{round_folder_name}: masks are {masks.shape} but the round they describe is "
+                f"{raw_image[:, 0, :, :].shape}.\n"
+                f"  image {full_stack_path}\n"
+                f"  masks {full_stack_masks_path}\n"
+                "  Intensities are measured in each round's own acquired frame, so cellpose/ "
+                "must hold masks on that grid, uncropped and unresampled. A reference-warped "
+                "copy (the kind in cellpose_aligned/) has the reference round's shape and "
+                "will not fit. If you supplied these masks yourself, check they came from this "
+                "round's volume; otherwise delete this file and re-run to segment again.")
 
         # Apply median filter if configured (with disk caching for re-runs)
         med_filter_stack = None
@@ -1370,118 +1425,6 @@ def match_masks(stack1_masks_path, stack2_masks_path, neighborhood_window_px=Non
     df = df.sort_values(['mask1', 'iou_at_mask1_z'], ascending=[True, False])
 
     return df
-
-
-## All dimensions must match, all must be 1 channel, all mask files must have 1 value per mask
-
-def convex_mask(landmarks_path: str, stack_path: str, Ydist: int, full_manifest: dict):
-    '''
-    Use landmarks to create two boundary surfaces and mask out everything outside them.
-
-    Args:
-        landmarks_path: Path to CSV file containing landmarks used for High res -> HCR Round 1 registration
-        stack_path: Path to masks that have been fully bigwarped (2x) to align with HCR Round 1
-        Ydist: Distance in microns beyond which everything will be masked out
-        
-    Returns:
-        numpy.ndarray: Masked image stack with regions outside boundary surfaces set to 0
-    '''
-
-    # Load landmark coordinates (X,Y,Z in microns) from CSV
-    df = pd.read_csv(landmarks_path, header=None)
-    df = df.replace([np.inf, -np.inf], np.nan).dropna()
-    x_values = df[5]  # X coordinates in microns
-    y_values = df[6]  # Y coordinates in microns 
-    z_values = df[7]  # Z coordinates in microns
-    points = np.column_stack((x_values, y_values, z_values))
-
-    # Create upper and lower boundary surfaces by offsetting landmark points
-    top_points = points.copy()
-    top_points[:, 2] += Ydist  # Shift up by Ydist microns
-    bottom_points = points.copy()
-    bottom_points[:, 2] -= Ydist  # Shift down by Ydist microns
-
-    # Image resolution factors to convert microns to voxels
-    resolution = full_manifest['data']['HCR_confocal_imaging']['rounds'][0]['resolution']
-
-    # Convert point coordinates from microns to voxels
-    top_points[:, 0] /= resolution[0]  # Scale X 
-    top_points[:, 1] /= resolution[1]  # Scale Y
-    top_points[:, 2] /= resolution[2]  # Scale Z
-    bottom_points[:, 0] /= resolution[0]
-    bottom_points[:, 1] /= resolution[1]
-    bottom_points[:, 2] /= resolution[2]
-
-    tiff_stack = tif_imread(stack_path)
-    # Handle both single channel (3D) and multichannel (4D) images
-    if tiff_stack.ndim < 4:
-        tiff_stack_first_channel = tiff_stack
-    elif tiff_stack.ndim == 4:
-        tiff_stack_first_channel = tiff_stack[:, 0, :, :]
-    else:
-        raise ValueError(f"Unsupported number of dimensions: {tiff_stack.ndim}")
-
-    z_slices, height, width = tiff_stack_first_channel.shape
-
-    def extrapolate_surface_to_image_edges(points, height, width):
-        """
-        Extrapolate Z values across full image using Delaunay triangulation.
-        
-        Args:
-            points: Landmark points
-            height: Image height in pixels
-            width: Image width in pixels
-            
-        Returns:
-            numpy.ndarray: Extrapolated Z values for each X,Y position
-        """
-        X, Y = np.meshgrid(np.arange(width), np.arange(height))
-        xy_grid = np.column_stack([X.ravel(), Y.ravel()])
-
-        interpolator = LinearNDInterpolator(points[:, :2], points[:, 2])
-        z_values = interpolator(xy_grid).reshape(height, width)
-
-        # Fill NaN values using nearest convex hull points
-        nan_mask = np.isnan(z_values)
-        if np.any(nan_mask):
-            convex_hull = ConvexHull(points[:, :2])
-            hull_points = points[convex_hull.vertices]
-
-            for i, j in zip(*np.where(nan_mask)):
-                x, y = X[i, j], Y[i, j]
-                nearest_point = hull_points[np.argmin(np.linalg.norm(hull_points[:, :2] - np.array([x, y]), axis=1))]
-                z_values[i, j] = nearest_point[2]
-
-        return z_values
-    
-    # Generate boundary surfaces
-    top_z_values = extrapolate_surface_to_image_edges(top_points, height, width)
-    bottom_z_values = extrapolate_surface_to_image_edges(bottom_points, height, width)
-
-    def blackout_above_and_below(tiff_stack, top_z_values, bottom_z_values):
-        """
-        Mask out regions above top surface and below bottom surface.
-
-        Args:
-            tiff_stack: Input image stack
-            top_z_values: Z coordinates of upper boundary surface  
-            bottom_z_values: Z coordinates of lower boundary surface
-
-        Returns:
-            numpy.ndarray: Masked image stack
-        """
-        volume = np.copy(tiff_stack)
-
-        for z in range(tiff_stack.shape[0]):
-            mask = (z > top_z_values) | (z < bottom_z_values)
-            volume[z, mask] = 0
-
-        return volume
-
-    # Apply masking to image stack
-    blacked_out_stack_first_channel = blackout_above_and_below(tiff_stack_first_channel, top_z_values, bottom_z_values)
-    return blacked_out_stack_first_channel
-
 
 
 def adjust_landmarks_for_plane(reference_landmarks_path, new_landmarks_path, reference_optotune, target_optotune):

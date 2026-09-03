@@ -27,6 +27,23 @@ mean image, or leave one entry in `rounds`.
 File naming is forgiving: `.tif` and `.tiff` both work, case is ignored, and a `{sample_name}_`
 prefix is accepted.
 
+## HCR FISH rounds only
+
+Registers the rounds to the reference, segments them, matches them to each other, and extracts
+intensities. No landmarks, no functional segmentation, no cross-modal step. Two ways in:
+
+| | |
+|---|---|
+| Manifest has no `two_photon_imaging` section | Nothing to pass, it is inferred. Template: [`demo_hcr_only.hjson`](../examples/demo_hcr_only.hjson) |
+| Manifest has one, but you want only the FISH half | `python master_pipeline.py --manifest your.hjson --only_hcr` |
+
+`--only_hcr` is the one to reach for when the functional data is not ready yet, or when you are
+re-running the molecular side of a manifest you otherwise want to leave alone. It cannot be
+combined with `--check_alignment`, which exists to align the functional planes to FISH.
+
+A single round is fine on its own: leave one entry in `rounds` and round-to-round registration
+skips itself.
+
 ## `params`
 
 | Section | Description |

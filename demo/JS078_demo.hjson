@@ -19,7 +19,7 @@
             sessions: [{
                 date: "260407"              // free-form label; not used to find files in tiff mode
                 input_format: "tiff"        // read 2P/plane_0.tiff (+ optional plane_0_hires.tiff)
-                functional_plane: ["0"]     // single plane in this demo
+                functional_planes: ["0"]    // single plane in this demo
             }]
         }
 
