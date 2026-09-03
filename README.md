@@ -75,6 +75,10 @@ python demo/explore_results.py --output PATH/OUTPUT   # same plots, no Jupyter
 [`demo_hcr_only.hjson`](examples/demo_hcr_only.hjson) for FISH alone. Either runs as it stands
 once the paths are yours.
 
+Already segmented one side? Hand the masks in and Cellpose is skipped:
+[docs/masks.md](docs/masks.md). To run only the FISH half of a manifest that has a functional
+section, pass `--only_hcr`; a manifest with no `two_photon_imaging` infers it.
+
 **2. Lay out your files.** `base_path` is the folder that *contains* your samples, so several
 manifests can share one and differ only by `sample_name`.
 
