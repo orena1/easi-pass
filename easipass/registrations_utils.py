@@ -445,6 +445,14 @@ def reposition_rigid(labels_2d, dy_field, dx_field):
 
     Per-plane measurements are in easipass/processing_notebooks/cascade_distortion_cohort.csv
     (area_p99, area_max and torn for this path vs the dense resample, per cascade stage).
+
+    Rotating each cell as well as moving it was tried and rejected. Keeping the rotation from
+    the polar decomposition of I - grad d is area-preserving, so it is not objectionable the
+    way the stretch is, but there is nothing to keep: the implied turn is a median 0.58 deg in
+    PBN and 0.52 deg in cortex, under a tenth of a pixel at the rim, and it fragmented more
+    cells than plain translation on 25 of 25 planes. The plane with the most rotation was the
+    one where it scored worst, which is what an interpolation artefact looks like. Data
+    registered genuinely off-axis would change that; see rigid_body_cohort.csv.
     """
     ids = np.unique(labels_2d)
     ids = ids[ids > 0]
