@@ -336,16 +336,10 @@ def _norm_u8(arr, plo_hi=(0, 99.5)):
         arr, in_range=(0, np.percentile(arr, plo_hi[1])), out_range=(0, 255)).astype(np.uint8)
 
 
-def _series_shape(path):
-    """Cheap tiff shape (header only) -- avoids loading a ~1GB mask just to compare frames."""
-    import tifffile
-    with tifffile.TiffFile(str(path)) as tf:
-        return tuple(tf.series[0].shape)
-
-
 def _load_round_data(reference_round, mov_round, fix_mask_path, mov_mask_path, ds):
     """Load fix/mov DAPI at full-res (local) + downsampled (global), and size-filtered
-    centroids. mov mask MUST be the NATIVE (unregistered) frame; we assert shape != fix.
+    centroids. Both masks must be in their own round's acquired frame, which is what
+    cellpose/ holds; cellpose_aligned/ holds the reference-frame copies and is not this.
 
     Returns a dict with full-res images/centroids and downsampled (global) images/centroids,
     all in (Y,X,Z) order, plus physical spacings.
@@ -370,9 +364,11 @@ def _load_round_data(reference_round, mov_round, fix_mask_path, mov_mask_path, d
         f"{mov_round['round']} mask (raw image changed without re-segmenting?). Delete "
         f"cellpose/{get_round_folder_name(mov_round['round'], reference_round['round'])}_masks.tiff "
         f"and re-run cellpose.")
-    assert fmask.shape != mmask.shape, (
-        f"mov mask shape == fix ({mmask.shape}) -> a WARPED-frame mask, nothing to register. "
-        f"Need the native-frame mov mask (HCR{mov_round['round']}_native_masks.tiff).")
+    # Nothing further is asserted about the two shapes relative to each other. Rounds
+    # acquired at the same dimensions give a mov mask the same shape as fix, which is
+    # perfectly normal, and in that case shape cannot tell an acquired-frame mask from a
+    # reference-warped one anyway. The guarantee comes from the folder, not the geometry:
+    # cellpose/ is each round in its own frame, cellpose_aligned/ is the warped copies.
 
     fix_cent, fix_area = _fast_centroids(fmask)
     mov_cent, mov_area = _fast_centroids(mmask)
@@ -830,19 +826,12 @@ def run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_roun
                                 severity=0, flags=[])
             continue
 
+        # Both masks come from cellpose/, which by convention holds each round in its own
+        # acquired frame; the reference-warped copies live in cellpose_aligned/ and are not
+        # what this step wants. _load_round_data checks each mask against its own raw image,
+        # which is the real guarantee -- the folder says which frame, the assert proves it.
         fix_mask = cellpose_dir / f"{get_round_folder_name(ref, ref)}_masks.tiff"
-        # mov mask MUST be the NATIVE (unregistered) frame. The canonical
-        # cellpose/{round_folder}_masks.tiff is native on most mice, but on some cp4 mice
-        # (JS082, CIM131) that name holds the REF-FRAME (warped) copy and the native one is
-        # HCR{N}_native_masks.tiff. Pick the first candidate whose shape DIFFERS from fix
-        # (== native frame); read tiff HEADERS only, so this stays cheap on ~1GB masks.
-        mov_candidates = [cellpose_dir / f"{get_round_folder_name(rnd, ref)}_masks.tiff",
-                          cellpose_dir / f"HCR{rnd}_native_masks.tiff"]
-        fix_shape = _series_shape(fix_mask) if fix_mask.exists() else None
-        mov_mask = next((c for c in mov_candidates
-                         if c.exists() and _series_shape(c) != fix_shape), None)
-        if mov_mask is None:                     # none look native -> first existing (assert explains)
-            mov_mask = next((c for c in mov_candidates if c.exists()), mov_candidates[0])
+        mov_mask = cellpose_dir / f"{get_round_folder_name(rnd, ref)}_masks.tiff"
         missing = [p for p in (fix_mask, mov_mask) if not Path(p).exists()]
         if missing:
             rprint(f"  [red]MISSING {missing} -- skipping HCR{rnd}[/red]")

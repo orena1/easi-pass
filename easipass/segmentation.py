@@ -841,22 +841,14 @@ def extract_probe_intensity(full_manifest):
     all_rounds = register_rounds + [reference_round['round']]
 
     def _stack_source(HCR_round, round_folder_name):
-        # Intensities are measured on the acquired (un-warped) round image, so the masks MUST be
-        # that round's NATIVE-frame masks -- not the ref-warped {round_folder}_masks.tiff. On mice
-        # whose rounds were acquired at different dims (e.g. cp4 SRC110/JS082: HCR02 3624x3215 vs
-        # HCR01 1942x1944) the warped masks have the ref shape, which != the native image -> the
-        # `raw_image[:,0].shape == masks.shape` assert below fires. Native masks are written as
-        # HCR{N}_native_masks.tiff; fall back to the canonical name when absent (older mice where
-        # native == ref shape, so the pairing was harmless).
+        # Intensities are measured on the acquired (un-warped) round image, so the masks must
+        # be in that same acquired frame. cellpose/ is where those live, for every round
+        # including the reference; the reference-warped copies are in cellpose_aligned/ and
+        # would be the wrong grid here. The shape assert below is what catches a mix-up.
         cellpose = output_root(full_manifest) / 'HCR' / 'cellpose'
-        if HCR_round == reference_round['round']:
-            mov = reference_round
-            masks = cellpose / f"{round_folder_name}_masks.tiff"   # ref isn't warped: canonical IS native
-        else:
-            mov = round_to_rounds[HCR_round]
-            native = cellpose / f"HCR{HCR_round}_native_masks.tiff"
-            masks = native if native.exists() else cellpose / f"{round_folder_name}_masks.tiff"
-        return Path(mov['image_path']), masks
+        mov = (reference_round if HCR_round == reference_round['round']
+               else round_to_rounds[HCR_round])
+        return Path(mov['image_path']), cellpose / f"{round_folder_name}_masks.tiff"
 
     # Check which rounds need processing
     to_process = []
@@ -930,7 +922,20 @@ def extract_probe_intensity(full_manifest):
         # Load images and verify sizes
         raw_image = tif_imread(full_stack_path)
         masks = tif_imread(full_stack_masks_path)
-        assert raw_image[:,0,:,:].shape == masks.shape
+        # The one place a mask on the wrong grid is still detectable. Say which two files
+        # disagree and what to do, because by here segmentation and registration have both
+        # run and a bare AssertionError sends people looking in the wrong place.
+        if raw_image[:, 0, :, :].shape != masks.shape:
+            raise ValueError(
+                f"{round_folder_name}: masks are {masks.shape} but the round they describe is "
+                f"{raw_image[:, 0, :, :].shape}.\n"
+                f"  image {full_stack_path}\n"
+                f"  masks {full_stack_masks_path}\n"
+                "  Intensities are measured in each round's own acquired frame, so cellpose/ "
+                "must hold masks on that grid, uncropped and unresampled. A reference-warped "
+                "copy (the kind in cellpose_aligned/) has the reference round's shape and "
+                "will not fit. If you supplied these masks yourself, check they came from this "
+                "round's volume; otherwise delete this file and re-run to segment again.")
 
         # Apply median filter if configured (with disk caching for re-runs)
         med_filter_stack = None
