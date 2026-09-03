@@ -254,6 +254,35 @@ def _find_user_masks(directory, stem):
     return None
 
 
+def _announce_masks_in_place(mask_path, expected_shape, what):
+    """Name the mask file a step is about to reuse, and check it still fits.
+
+    Cellpose writes its own output under the same names a user is invited to supply, so
+    on a re-run there is no way to tell which one is on disk -- and no need to, since
+    reusing it is right either way. What matters is not being silent about it: on a first
+    run anything here was put here by hand, and the old message ("exists") hid both the
+    path and the fact that a supplied file was being used at all.
+
+    The shape comes from the TIFF header, so this stays free on a 1 GB mask. A mismatch is
+    always wrong, but it is reported rather than raised here: the run has not yet spent
+    anything, and the steps that consume these masks fail with the full explanation.
+    """
+    shape = None
+    if mask_path.suffix.lower() in ('.tif', '.tiff'):
+        try:
+            with TiffFile(str(mask_path)) as tf:
+                shape = tuple(tf.series[0].shape)
+        except Exception:
+            shape = None
+    size_mb = mask_path.stat().st_size / 1e6
+    rprint(f"  [green]{what}: using masks already in place[/green] — {mask_path.name} "
+           f"({size_mb:,.0f} MB){f', {shape}' if shape else ''}")
+    if shape is not None and expected_shape is not None and shape != tuple(expected_shape):
+        rprint(f"    [yellow]note: these masks are {shape} but the image they describe is "
+               f"{tuple(expected_shape)} — the step that reads them will stop and say so. "
+               f"Delete {mask_path.name} to segment again.[/yellow]")
+
+
 def _read_user_masks(path):
     """Read a label array from any of the accepted mask forms.
 
@@ -464,6 +493,13 @@ def run_cellpose(full_manifest):
         mov = reference_round if HCR_round == reference_round['round'] else round_to_rounds[HCR_round]
         source_path = mov['image_path']
         if output_path.exists():
+            # This is also the name the docs invite you to drop your own masks under, so
+            # on a first run this branch IS the bring-your-own path. Say which file.
+            with TiffFile(str(source_path)) as tf:
+                raw_shape = tf.series[0].shape
+            _announce_masks_in_place(
+                output_path, tuple(s for i, s in enumerate(raw_shape) if i != 1),
+                round_folder_name)
             skipped.append(round_folder_name)
             continue
 
@@ -487,9 +523,12 @@ def run_cellpose(full_manifest):
 
         to_process.append((round_folder_name, source_path, output_path))
 
-    # Print summary
+    # Print summary. Each reused round has already named its own file above, so this only
+    # has to say that nothing needs segmenting -- "exist" on its own used to be the entire
+    # report, which read like pipeline output even when every mask had been supplied.
     if not to_process:
-        rprint(f"[dim]HCR cellpose: all {len(all_rounds)} rounds exist[/dim]")
+        rprint(f"[dim]HCR cellpose: nothing to segment, all {len(all_rounds)} rounds "
+               f"already have masks[/dim]")
         return
 
     rprint(f"HCR cellpose: processing {len(to_process)}/{len(all_rounds)} rounds")
@@ -590,7 +629,20 @@ def extract_2p_cellpose_masks(full_manifest: dict, session: dict):
     tiff_path = cellpose_path / f'lowres_meanImg_C0_plane{current_plane}.tiff'
 
     if twop_cellpose_file.exists():
-        rprint(f"[dim]2P cellpose plane {current_plane}: exists[/dim]")
+        rprint(f"  [green]2P plane {current_plane}: using masks already in place[/green] — "
+               f"{twop_cellpose_file.name}")
+        # _seg.npy is read in preference to the _masks.tiff beside it, so masks dropped in
+        # after a run that already segmented are ignored. That is the one case nothing
+        # else notices, and mtime is enough to spot it -- the same test the merged feature
+        # tables already use. Reported, not acted on: re-deriving here would discard a
+        # hand-corrected _seg.npy, which is also a file someone may have worked on.
+        newer = [p for p in (cellpose_path / f'lowres_meanImg_C0_plane{current_plane}{sfx}'
+                             for sfx in ('_masks.tiff', '_masks.tif', '_masks.npy'))
+                 if p.exists() and p.stat().st_mtime > twop_cellpose_file.stat().st_mtime]
+        for p in newer:
+            rprint(f"    [yellow]{p.name} is newer than {twop_cellpose_file.name} and is "
+                   f"NOT being used. If those are masks you just supplied, delete "
+                   f"{twop_cellpose_file.name} (see docs/masks.md).[/yellow]")
         return twop_cellpose_file
 
     if not tiff_path.exists():

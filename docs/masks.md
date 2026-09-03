@@ -1,8 +1,16 @@
 # Bringing your own masks
 
 Hand in masks for either side and EASI-PASS skips Cellpose there, going straight to registering
-and matching them. Each segmentation step looks for your masks first and skips itself if it
-finds them, and the run prints which file it used, or says it found none and is segmenting.
+and matching them. Put the files in the locations below, alongside what the pipeline writes
+itself, and the run reports which of the two happened for every plane and round:
+
+```
+HCR01: using masks already in place — HCR01_masks.tiff (619 MB), (39, 1993, 1992)
+2P plane 0: no masks supplied (lowres_meanImg_C0_plane0_masks.tiff), segmenting
+```
+
+Cellpose runs only in the second case. The message always names the file, so you can see at a
+glance whether the masks in play are the ones you put there.
 
 | Masks you have | Put them here |
 |---|---|
@@ -38,12 +46,18 @@ To segment again, delete the mask file and the `_seg.npy` beside it.
 
 ## Substituting masks into a run that already happened
 
-On a fresh run, dropping the files in is all there is to it. But the pipeline skips any step
-whose output exists, so once a run has been through segmentation, **new masks are ignored until
-you delete what was derived from the old ones**. Nothing warns you: those steps report as
-already done and the run finishes with the old cells.
+On a fresh run, dropping the files in is all there is to it — there is nothing of the
+pipeline's there yet, so anything it finds is yours.
 
-Delete along the chain. Everything listed is derived and will be rebuilt.
+Into a run that has already segmented, **delete everything downstream of the masks first.**
+The pipeline skips any step whose output exists, so otherwise your new masks sit there unused
+and the run finishes with the old cells. On the functional side it will at least tell you
+this is happening — a `_masks.tiff` newer than its `_seg.npy` gets called out by name — but on
+the FISH side nothing notices.
+
+Deleting the whole `OUTPUT/` folder is the simple option, **but your masks live inside it**, so
+copy them somewhere else first or you will delete your own input. Otherwise work down the chain;
+everything listed is derived and will be rebuilt.
 
 **Functional plane `N`** — your file is `2P/cellpose/lowres_meanImg_C0_plane{N}_masks.tiff`:
 
@@ -70,10 +84,6 @@ Keep `lowres_meanImg_C0_plane{N}.tiff` — that is the mean image, not a mask.
 
 The merged feature tables in `MERGED/aligned_extracted_features/` look after themselves: they
 rebuild whenever an intensity file is newer.
-
-If picking through that is unappealing, deleting the whole `OUTPUT/` folder and re-running is
-always correct. It costs re-segmenting the rounds you did not replace, which is often the
-cheaper mistake to avoid.
 
 ## Suite2p ROIs
 
