@@ -10,7 +10,7 @@ HCR01: using masks already in place — HCR01_masks.tiff (619 MB), (39, 1993, 19
 
 | Masks you have | Put them here |
 |---|---|
-| Functional plane `N` | `OUTPUT/2P/cellpose/lowres_meanImg_C0_plane{N}_masks.tiff` |
+| 2P plane `N` | `OUTPUT/2P/cellpose/lowres_meanImg_C0_plane{N}_masks.tiff` |
 | HCR FISH round `R` | `OUTPUT/HCR/cellpose/HCR{R}_masks.tiff` |
 | HCR FISH masks already warped into the reference frame | `OUTPUT/HCR/cellpose_aligned/` instead, which skips the warping step |
 
@@ -27,11 +27,11 @@ is Cellpose's own `_seg.npy` if you hand-corrected in its GUI.
 Two rules, both checked. Break either and the run stops, naming your file and the shape it
 expected:
 
-- **Same shape as the image they describe**: the functional mean image, or the HCR FISH volume
+- **Same shape as the image they describe**: the 2P mean image, or the HCR FISH volume
   as acquired, indexed `(Z, Y, X)`. Uncropped, unresampled.
 - At most **65,535 cells** per image.
 
-Give functional masks in the orientation of the mean image you supplied; the pipeline applies
+Give 2P masks in the orientation of the mean image you supplied; the pipeline applies
 `rotation_2p_to_HCR` to both together.
 
 To segment again, delete the mask file and the `_seg.npy` beside it.
@@ -44,7 +44,7 @@ with the old cells.
 
 Everything below is rebuilt from your masks.
 
-Functional plane `N`:
+2P plane `N`:
 
 ```
 2P/cellpose/lowres_meanImg_C0_plane{N}_seg.npy          ← this one shadows your masks

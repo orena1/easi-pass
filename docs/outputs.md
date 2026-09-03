@@ -9,7 +9,7 @@ OUTPUT/
 │   ├── cellpose_aligned/         those masks warped into the reference frame
 │   └── extract_intensities/      per-cell fluorescence per channel
 ├── 2P/
-│   ├── cellpose/                 2D functional masks
+│   ├── cellpose/                 2P cell masks
 │   └── registered/               landmarks, transforms, QC overlays
 └── MERGED/
     ├── aligned_masks/            per-cell match tables
@@ -24,22 +24,42 @@ Mask naming, in `cellpose/` and `cellpose_aligned/`: the reference round is plai
 `HCR01_masks.tiff`, and non-reference rounds are `HCR{R}_to_HCR{ref}_masks.tiff`, so round 02
 against reference 01 is `HCR02_to_HCR01_masks.tiff`.
 
+## QualityCheck: what the overlays are
+
+`2P/registered/QualityCheck/` holds two-channel `CYX` TIFFs — channel 0 the HCR FISH masks,
+channel 1 the 2P masks — for the alignment before and after the cascade. Open them in Fiji
+and the two channels land as the familiar red/green pair.
+
+| File | |
+|---|---|
+| `plane{N}_BEFORE_registration_overlay.tiff` | Landmarks only, before the cascade |
+| `plane{N}_AFTER_registration_overlay.tiff` | After the cascade. **The one to judge a run by** |
+| `plane{N}_*_eroded_smoothed.tiff` | Same pair, eroded and smoothed, easier to read at a glance |
+| `plane{N}_stage_{stage}.tiff` | One per cascade stage, so you can see where it stopped improving |
+
+These are **masks, not images**: every channel is binary or labelled, not raw fluorescence.
+That is deliberate — alignment is scored on mask overlap, so the overlays show what was
+scored. It also means they look blockier than the underlying data.
+
+For raw intensity instead, [`demo/explore_results.ipynb`](../demo/explore_results.ipynb) draws
+the 2P mean image in greyscale with its masks on top, for any finished `OUTPUT`.
+
 ## The per-cell matching table
 
 At `OUTPUT/MERGED/aligned_masks/twop_plane{N}_to_HCR01.csv`. One row per candidate
-functional/HCR FISH pair. The demo's first row, as it appears in the file:
+2P/HCR FISH pair. The demo's first row, as it appears in the file:
 
 | mask1 | mask2 | iou | iou_at_mask1_z | is_best_match | somaprint_hcr_label | somaprint_confident |
 |---|---|---|---|---|---|---|
 | 1 | 20646 | 0.064 | 0.287 | True | 20646 | True |
 
-Functional cell 1 pairs with HCR FISH cell 20646, both matchers agree, and overlap is weak in 3D
+2P cell 1 pairs with HCR FISH cell 20646, both matchers agree, and overlap is weak in 3D
 but better within the plane, which is normal for one plane cutting a volume.
 
 | Column | Meaning |
 |---|---|
-| `mask1`, `mask2` | Functional cell id, HCR FISH cell id |
-| `iou`, `iou_at_mask1_z` | Mask overlap, in 3D and in the functional plane |
+| `mask1`, `mask2` | 2P cell id, HCR FISH cell id |
+| `iou`, `iou_at_mask1_z` | Mask overlap, in 3D and in the 2P plane |
 | `containment_2p`, `containment_hcr_at_z` | Directional overlap, each way |
 | `mask1_size`, `mask2_size`, `mask2_size_at_mask1_z` | Mask sizes, in voxels |
 | `intersection` | Shared voxels |
@@ -67,17 +87,17 @@ is every column it has:
 | 7372 | 5.861 | 1.044 | 0.0045 | 0.0002 | 0.493 | 629 | 0.390 | 629 | True | 0 |
 | 8399 | 7.441 | 1.267 | 0.0070 | 0.0003 | 0.831 | 1194 | 0.028 | 1224 | True | 0 |
 
-Read a row as: this HCR FISH cell, its intensity in every channel, and which functional cell it
+Read a row as: this HCR FISH cell, its intensity in every channel, and which 2P cell it
 is. The third row is the one to understand before trusting either matcher, since overlap and
-soma-print name different functional cells (1194 against 1224) on a weak overlap of 0.028.
+soma-print name different 2P cells (1194 against 1224) on a weak overlap of 0.028.
 
 | Column | Meaning |
 |---|---|
 | `mask_id_main` | The HCR FISH cell, in the reference round. The row is about this cell |
-| `plane` | The functional plane this file covers |
+| `plane` | The 2P plane this file covers |
 | `{feature}_round_{R}_{gene}` | One column per channel per round, named for the channels in your manifest |
-| `twoP_iou_match`, `twoP_iou` | The functional cell matched by mask overlap, and how good that overlap was |
-| `twoP_somaprint_match` | The functional cell soma-print picked, independently |
+| `twoP_iou_match`, `twoP_iou` | The 2P cell matched by mask overlap, and how good that overlap was |
+| `twoP_somaprint_match` | The 2P cell soma-print picked, independently |
 | `twoP_somaprint_confident` | Whether that pick cleared its gate. Always `True`/`False`, never blank |
 
 **Multi-round runs add a group per later round `R`**, absent above because the demo has one

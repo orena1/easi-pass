@@ -30,16 +30,16 @@ prefix is accepted.
 ## HCR FISH rounds only
 
 Registers the rounds to the reference, segments them, matches them to each other, and extracts
-intensities. No landmarks, no functional segmentation, no cross-modal step. Two ways in:
+intensities. No landmarks, no 2P segmentation, no cross-modal step. Two ways in:
 
 | | |
 |---|---|
 | Manifest has no `two_photon_imaging` section | Nothing to pass, it is inferred. Template: [`demo_hcr_only.hjson`](../examples/demo_hcr_only.hjson) |
 | Manifest has one, but you want only the FISH half | `python master_pipeline.py --manifest your.hjson --only_hcr` |
 
-`--only_hcr` is the one to reach for when the functional data is not ready yet, or when you are
+`--only_hcr` is the one to reach for when the 2P data is not ready yet, or when you are
 re-running the molecular side of a manifest you otherwise want to leave alone. It cannot be
-combined with `--check_alignment`, which exists to align the functional planes to FISH.
+combined with `--check_alignment`, which exists to align the 2P planes to FISH.
 
 A single round is fine on its own: leave one entry in `rounds` and round-to-round registration
 skips itself.
@@ -52,7 +52,7 @@ skips itself.
 | `HCR_cellpose`, `2p_cellpose` | Cellpose model and parameters for each side |
 | `twop_to_hcr_registration` | Cross-modal cascade: tile sizes, search ranges, thresholds |
 | `intensity_extraction` | Background settings for probe intensity measurement |
-| `rotation_2p_to_HCR` | `fliplr` / `flipud` to un-mirror the functional image, plus an optional coarse `rotation`. The flip is the part that has to be right |
+| `rotation_2p_to_HCR` | `fliplr` / `flipud` to un-mirror the 2P image, plus an optional coarse `rotation`. The flip is the part that has to be right |
 
 Every section has working defaults in the templates.
 

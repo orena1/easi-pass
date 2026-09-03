@@ -77,7 +77,7 @@ Re-running the script is safe: it skips the download when the data is already th
 
 ## Regenerating the demo data (maintainers)
 
-`demo_pre_run/` is one functional plane (0) and one HCR FISH round (01) of JS078, at full
+`demo_pre_run/` is one 2P plane (0) and one HCR FISH round (01) of JS078, at full
 resolution and full frame:
 
 ```bash

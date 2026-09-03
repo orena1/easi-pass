@@ -14,7 +14,7 @@ Three steps differ:
 | Segmentation | Existing output wins over masks you supply, so `_seg.npy` beats the `_masks.tiff` beside it. Delete `_seg.npy` to have your masks read; delete both to segment again. The run names whichever file it used |
 | Merged feature tables | Rebuild when any intensity file is newer than the table, so they refresh on their own |
 
-## Re-orienting the functional image
+## Re-orienting the 2P image
 
 This is the one thing the manifest alone cannot redo, since the flip is applied once, on the
 first run. Delete
@@ -28,6 +28,6 @@ orientation.
 
 ## Re-doing only the alignment
 
-`--check_alignment` stops after registering and matching the functional planes to the reference
+`--check_alignment` stops after registering and matching the 2P planes to the reference
 round, so you can settle the cross-modal step without processing later rounds. See
 [landmarks.md](landmarks.md#checking-the-alignment-first).
