@@ -24,8 +24,6 @@ from tifffile import imread as tif_imread
 from tifffile import imwrite as tif_imsave
 from tifffile import TiffFile
 from tqdm.auto import tqdm
-from scipy.spatial import ConvexHull
-from scipy.interpolate import LinearNDInterpolator
 try:
     from .registrations import verify_rounds  # Relative import (running as part of a package)
     from .functional import get_number_of_suite2p_planes
@@ -1427,118 +1425,6 @@ def match_masks(stack1_masks_path, stack2_masks_path, neighborhood_window_px=Non
     df = df.sort_values(['mask1', 'iou_at_mask1_z'], ascending=[True, False])
 
     return df
-
-
-## All dimensions must match, all must be 1 channel, all mask files must have 1 value per mask
-
-def convex_mask(landmarks_path: str, stack_path: str, Ydist: int, full_manifest: dict):
-    '''
-    Use landmarks to create two boundary surfaces and mask out everything outside them.
-
-    Args:
-        landmarks_path: Path to CSV file containing landmarks used for High res -> HCR Round 1 registration
-        stack_path: Path to masks that have been fully bigwarped (2x) to align with HCR Round 1
-        Ydist: Distance in microns beyond which everything will be masked out
-        
-    Returns:
-        numpy.ndarray: Masked image stack with regions outside boundary surfaces set to 0
-    '''
-
-    # Load landmark coordinates (X,Y,Z in microns) from CSV
-    df = pd.read_csv(landmarks_path, header=None)
-    df = df.replace([np.inf, -np.inf], np.nan).dropna()
-    x_values = df[5]  # X coordinates in microns
-    y_values = df[6]  # Y coordinates in microns 
-    z_values = df[7]  # Z coordinates in microns
-    points = np.column_stack((x_values, y_values, z_values))
-
-    # Create upper and lower boundary surfaces by offsetting landmark points
-    top_points = points.copy()
-    top_points[:, 2] += Ydist  # Shift up by Ydist microns
-    bottom_points = points.copy()
-    bottom_points[:, 2] -= Ydist  # Shift down by Ydist microns
-
-    # Image resolution factors to convert microns to voxels
-    resolution = full_manifest['data']['HCR_confocal_imaging']['rounds'][0]['resolution']
-
-    # Convert point coordinates from microns to voxels
-    top_points[:, 0] /= resolution[0]  # Scale X 
-    top_points[:, 1] /= resolution[1]  # Scale Y
-    top_points[:, 2] /= resolution[2]  # Scale Z
-    bottom_points[:, 0] /= resolution[0]
-    bottom_points[:, 1] /= resolution[1]
-    bottom_points[:, 2] /= resolution[2]
-
-    tiff_stack = tif_imread(stack_path)
-    # Handle both single channel (3D) and multichannel (4D) images
-    if tiff_stack.ndim < 4:
-        tiff_stack_first_channel = tiff_stack
-    elif tiff_stack.ndim == 4:
-        tiff_stack_first_channel = tiff_stack[:, 0, :, :]
-    else:
-        raise ValueError(f"Unsupported number of dimensions: {tiff_stack.ndim}")
-
-    z_slices, height, width = tiff_stack_first_channel.shape
-
-    def extrapolate_surface_to_image_edges(points, height, width):
-        """
-        Extrapolate Z values across full image using Delaunay triangulation.
-        
-        Args:
-            points: Landmark points
-            height: Image height in pixels
-            width: Image width in pixels
-            
-        Returns:
-            numpy.ndarray: Extrapolated Z values for each X,Y position
-        """
-        X, Y = np.meshgrid(np.arange(width), np.arange(height))
-        xy_grid = np.column_stack([X.ravel(), Y.ravel()])
-
-        interpolator = LinearNDInterpolator(points[:, :2], points[:, 2])
-        z_values = interpolator(xy_grid).reshape(height, width)
-
-        # Fill NaN values using nearest convex hull points
-        nan_mask = np.isnan(z_values)
-        if np.any(nan_mask):
-            convex_hull = ConvexHull(points[:, :2])
-            hull_points = points[convex_hull.vertices]
-
-            for i, j in zip(*np.where(nan_mask)):
-                x, y = X[i, j], Y[i, j]
-                nearest_point = hull_points[np.argmin(np.linalg.norm(hull_points[:, :2] - np.array([x, y]), axis=1))]
-                z_values[i, j] = nearest_point[2]
-
-        return z_values
-    
-    # Generate boundary surfaces
-    top_z_values = extrapolate_surface_to_image_edges(top_points, height, width)
-    bottom_z_values = extrapolate_surface_to_image_edges(bottom_points, height, width)
-
-    def blackout_above_and_below(tiff_stack, top_z_values, bottom_z_values):
-        """
-        Mask out regions above top surface and below bottom surface.
-
-        Args:
-            tiff_stack: Input image stack
-            top_z_values: Z coordinates of upper boundary surface  
-            bottom_z_values: Z coordinates of lower boundary surface
-
-        Returns:
-            numpy.ndarray: Masked image stack
-        """
-        volume = np.copy(tiff_stack)
-
-        for z in range(tiff_stack.shape[0]):
-            mask = (z > top_z_values) | (z < bottom_z_values)
-            volume[z, mask] = 0
-
-        return volume
-
-    # Apply masking to image stack
-    blacked_out_stack_first_channel = blackout_above_and_below(tiff_stack_first_channel, top_z_values, bottom_z_values)
-    return blacked_out_stack_first_channel
-
 
 
 def adjust_landmarks_for_plane(reference_landmarks_path, new_landmarks_path, reference_optotune, target_optotune):
