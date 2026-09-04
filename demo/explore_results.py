@@ -115,6 +115,22 @@ def main():
         print("  with no two_photon_imaging). The gene columns below are unaffected;")
         print("  only the cross-modal panels are skipped.")
 
+    # The panels below assume this shape, so check it here. The notebook runs the
+    # same checks, in its "How the table is laid out" cell.
+    checks = {
+        "one row per cell (mask_id_main unique)": merged["mask_id_main"].is_unique,
+        "every gene column is numeric": all(pd.api.types.is_numeric_dtype(merged[g]) for g in genes),
+        "no gene column is entirely blank": all(merged[g].notna().any() for g in genes),
+        "the table covers a single plane": merged["plane"].nunique() == 1,
+    }
+    if has_functional:
+        checks["twoP_somaprint_confident is never blank"] = merged["twoP_somaprint_confident"].notna().all()
+        checks["twoP_iou lies between 0 and 1"] = bool(merged["twoP_iou"].dropna().between(0, 1).all())
+
+    print("\n  Is the table organised the way that says?")
+    for label, ok in checks.items():
+        print(f"    {'ok  ' if ok else 'BAD '} {label}")
+
     # ------------------------------------------------------------- coordinates
     print("\n" + "=" * 72)
     print("WHERE THE CELLS ARE")
@@ -144,14 +160,22 @@ def main():
 
     # ------------------------------------------------------------------ figure
     matched = merged["twoP_iou_match"].notna().to_numpy()
-    # DAPI is a nuclear stain in every round, so it says nothing about cell type.
-    # Of the rest, prefer the channels with signal: a probe that labels almost
-    # nothing makes a plot that looks broken rather than sparse.
-    candidates = [g for g in genes if "DAPI" not in g.upper()] or genes
-    show = sorted(candidates, key=lambda g: merged[g].median(), reverse=True)[:2]
+    # DAPI is a nuclear stain in every round and GCAMP reports the functional
+    # indicator, so neither says anything about cell type. PREFERRED is the same
+    # list the notebook uses, so the two views show the same panels.
+    PREFERRED = ("PV", "SST")            # edit for your own panel
+    informative = [g for g in genes
+                   if not any(s in g.upper() for s in ("DAPI", "GCAMP"))] or genes
+    show = [g for g in informative if any(g.upper().endswith("_" + p) for p in PREFERRED)]
 
-    # The top row is entirely about the functional match, so a FISH-only run drops
-    # it rather than printing three empty axes.
+    # A panel without those probes falls back to the channels with the most
+    # signal, so both axes stay filled.
+    show += [g for g in sorted(informative, key=lambda g: merged[g].median(), reverse=True)
+             if g not in show]
+    show = show[:2]
+
+    # The top row is entirely about the functional match, so a FISH-only run
+    # drops it.
     if has_functional:
         fig, axes = plt.subplots(2, 3, figsize=(16, 9.5))
         fig.suptitle(f"EASI-PASS results, functional plane {plane}", fontsize=14, y=0.98)
@@ -202,10 +226,9 @@ def main():
         ax.set_title("Overlap of the matched pairs")
         ax.legend(frameon=False, fontsize=8)
 
-    # genes in space. Every cell is drawn faint and the expressing ones are drawn
-    # on top. Colouring all 21,000 by raw intensity does not work: the distribution
-    # is so skewed that almost every cell sits at the bottom of the colour map and
-    # the plot reads as uniformly dark.
+    # genes in space, every cell faint underneath and the expressing ones on top.
+    # Colouring all 21,000 by raw intensity reads as uniformly dark, because the
+    # distribution is too skewed.
     for ax, gene in zip(gene_axes, show):
         v = df[gene].to_numpy()
         cut = np.nanpercentile(v, 90)
@@ -219,13 +242,12 @@ def main():
         ax.set_aspect("equal"); ax.invert_yaxis()
         ax.set_xlabel("X (px)"); ax.set_ylabel("Y (px)")
         ax.set_title(f"{gene.replace(f'{feature}_', '')}\ntop 10% of cells, "
-                     f"the rest in grey")
+                     f"the rest in grey, all depths collapsed")
         plt.colorbar(sc, ax=ax, fraction=0.046, label="intensity")
 
     # what one gene looks like across the cells. Most sit near zero with a long
-    # tail, which is the shape that decides where a "positive" threshold goes, so
-    # plot it rather than a summary statistic. With no functional match there is
-    # no matched subset to take, so this is every cell in the reference round.
+    # tail, and that shape is what decides where a "positive" threshold goes.
+    # With no functional match there is no matched subset, so this is every cell.
     ax = hist_ax
     gene = show[0]
     subset = merged.loc[matched, gene] if has_functional else merged[gene]
