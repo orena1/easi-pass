@@ -1,19 +1,22 @@
 # EASI-PASS
 
-Match cells between two-photon functional imaging and multi-round HCR FISH, and get one table
-joining functional identity to molecular readout. Also runs on FISH rounds alone, with no
-functional data.
+Match cells between two-photon (2P) functional imaging and multi-round HCR FISH, and get one table
+joining 2P identity to molecular readout. Also runs on FISH rounds alone, with no
+2P data.
 
-![EASI-PASS takes functional imaging and FISH rounds and returns one row per cell](docs/images/overview.png)
+![EASI-PASS takes 2P imaging and FISH rounds and returns one row per cell](docs/images/overview.png)
 
 ## Inputs
 
 | | Format |
 |---|---|
-| Functional field of view | One 2D mean image per plane, TIFF |
+| 2P field of view | One 2D mean image per plane, TIFF |
 | FISH rounds | One multi-channel 3D volume per round, TIFF. EASI-FISH or another HCR FISH protocol |
 | Hi-res structural image *(optional)* | One stitched 2D TIFF per plane |
 | Landmarks | A few points placed once in [BigWarp](https://imagej.net/plugins/bigwarp). Not needed for FISH-only runs |
+
+**2P** here means the functional mean image, and nothing requires two-photon: it is one 2D
+TIFF per plane, from whatever microscope and preprocessing produced it.
 
 Everything else is set in a [manifest](docs/manifest.md). The run pauses four times: to set the
 orientation, place landmarks, check the segmentation, and accept the alignment.
@@ -67,16 +70,16 @@ jupyter lab demo/explore_results.ipynb
 python demo/explore_results.py --output PATH/OUTPUT   # same plots, no Jupyter
 ```
 
-![Which functional cells matched, and where the plane landed in the volume](docs/images/explore_results.png)
+![Which 2P cells matched, and where the plane landed in the volume](docs/images/explore_results.png)
 
 ## Running your own data
 
-**1. Copy a template.** [`demo_tiff.hjson`](examples/demo_tiff.hjson) for functional + FISH,
+**1. Copy a template.** [`demo_tiff.hjson`](examples/demo_tiff.hjson) for 2P + FISH,
 [`demo_hcr_only.hjson`](examples/demo_hcr_only.hjson) for FISH alone. Either runs as it stands
 once the paths are yours.
 
 Already segmented one side? Hand the masks in and Cellpose is skipped:
-[docs/masks.md](docs/masks.md). To run only the FISH half of a manifest that has a functional
+[docs/masks.md](docs/masks.md). To run only the FISH half of a manifest that has a 2P
 section, pass `--only_hcr`; a manifest with no `two_photon_imaging` infers it.
 
 **2. Lay out your files.** `base_path` is the folder that *contains* your samples, so several
@@ -85,7 +88,7 @@ manifests can share one and differ only by `sample_name`.
 ```
 /data/experiments/M12/          base_path: "/data/experiments", sample_name: "M12"
 ├── 2P/
-│   ├── plane_0.tiff            functional mean image, one per plane
+│   ├── plane_0.tiff            2P mean image, one per plane
 │   └── plane_0_hires.tiff      optional, must already be stitched
 ├── HCR/
 │   ├── HCR01.tiff              reference round
@@ -102,7 +105,7 @@ matches a `round` value.
 python master_pipeline.py --manifest your_manifest.hjson --check_alignment
 ```
 
-Stops after matching the functional planes to the reference round. Review
+Stops after matching the 2P planes to the reference round. Review
 `OUTPUT/2P/registered/QualityCheck/`, then re-run without the flag. Everything the check
 produced is reused.
 
@@ -112,7 +115,7 @@ produced is reused.
 
 | Step | |
 |---|---|
-| **1. Orient the functional image** | The pipeline prints both paths and waits. If one is mirrored, add `fliplr` or `flipud` to `rotation_2p_to_HCR`. Only mirroring has to be right here; the landmarks in step 2 handle rotation |
+| **1. Orient the 2P image** | The pipeline prints both paths and waits. If one is mirrored, add `fliplr` or `flipud` to `rotation_2p_to_HCR`. Only mirroring has to be right here; the landmarks in step 2 handle rotation |
 | **2. Place landmarks** | A handful of points in BigWarp. Runs before Cellpose on purpose, so a bad alignment costs minutes instead of an hour of segmentation |
 
 **Segmentation**
@@ -161,7 +164,7 @@ OUTPUT/
 │   ├── cellpose_aligned/         those masks warped into the reference frame
 │   └── extract_intensities/      per-cell fluorescence per channel
 ├── 2P/
-│   ├── cellpose/                 2D functional masks
+│   ├── cellpose/                 2P cell masks
 │   └── registered/               landmarks, transforms, QC overlays
 └── MERGED/
     ├── aligned_masks/            per-cell match tables
@@ -192,7 +195,7 @@ Every column of both tables: [docs/outputs.md](docs/outputs.md).
 | `master_pipeline.py` | The command line, and the order every step runs in |
 | `easipass/meta.py` | Manifest parsing and validation |
 | `easipass/importers.py` | Picks the reader for your `input_format` |
-| `easipass/functional.py` | Reads the functional side, applies the flip and rotation |
+| `easipass/functional.py` | Reads the 2P side, applies the flip and rotation |
 | `easipass/segmentation.py` | Cellpose segmentation, mask matching, merged tables |
 | `easipass/registrations.py` | Runs the registration steps in order |
 | `easipass/registrations_utils.py` | Cross-modal registration algorithms |

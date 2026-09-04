@@ -1,5 +1,6 @@
 from collections import defaultdict
 from pathlib import Path
+import os
 import shutil
 from cellpose import models
 from cellpose import io
@@ -171,6 +172,30 @@ def _resolve_gpu(cellpose_params: dict, context: str) -> bool:
         else:
             rprint("[dim]Cellpose on the CPU (gpu: false)[/dim]")
     return bool(accelerator)
+
+
+def _cellpose_weights_present(model_path: str) -> bool:
+    """Best-effort: are the weights already on disk, or will this download them?
+
+    Chooses the wording of a notice and nothing else, so every uncertain path answers
+    True: saying nothing is better than warning about a download that is not happening.
+    A model_path that resolves to a real file is the user's own model and never downloads.
+    Cellpose's own location wins where it exposes one, then its documented env override,
+    then the default cache.
+    """
+    try:
+        p = Path(model_path)
+        if p.exists():
+            return True
+        model_dir = (getattr(models, 'MODEL_DIR', None)
+                     or os.environ.get('CELLPOSE_LOCAL_MODELS_PATH')
+                     or Path.home() / '.cellpose' / 'models')
+        model_dir = Path(model_dir)
+        if not model_dir.is_dir():
+            return False
+        return any(f.name.startswith(p.name) for f in model_dir.iterdir())
+    except Exception:
+        return True
 
 
 def _get_cached_cellpose_model(model_path: str, gpu: bool):
@@ -447,13 +472,29 @@ class CellposeModelWrapper:
         self.params = params
         self.model = None
 
+    def warm(self):
+        """Build the model now, before any progress bar is on screen.
+
+        Constructing a cellpose model is where the weights are fetched, and cpsam is
+        several hundred MB on a first run. Left to the first eval() this happened inside
+        the per-slice bar, so the bar sat at 0/N for minutes with nothing said -- and the
+        device line from _resolve_gpu printed underneath an active bar, where tqdm
+        redraws over it. Both belong in plain output before anything is drawn.
+        """
+        if self.model is not None:
+            return
+        model_path = self.params['HCR_cellpose']['model_path']
+        gpu = _resolve_gpu(self.params['HCR_cellpose'], 'FISH volumes')
+        if not _cellpose_weights_present(model_path):
+            rprint(f"[yellow]Fetching the {model_path} weights (once, a few hundred MB). "
+                   "Nothing is wrong if this takes a while.[/yellow]")
+        else:
+            rprint(f"[dim]Loading cellpose model {model_path}[/dim]")
+        self.model = _get_cached_cellpose_model(model_path, gpu)
+
     def eval(self, raw_image, progress=None):
         if self.model is None:
-            # Use cached model (optimization: reuse across pipeline)
-            self.model = _get_cached_cellpose_model(
-                self.params['HCR_cellpose']['model_path'],
-                _resolve_gpu(self.params['HCR_cellpose'], 'FISH volumes')
-            )
+            self.warm()
 
         kw = _eval_kwargs(self.params['HCR_cellpose'], is_3d_stack=True)
         if 'stitch_threshold' in kw:
@@ -531,6 +572,8 @@ def run_cellpose(full_manifest):
 
     rprint(f"HCR cellpose: processing {len(to_process)}/{len(all_rounds)} rounds")
     model_wrapper = CellposeModelWrapper(params)
+    # Before the bars, not inside them: see CellposeModelWrapper.warm.
+    model_wrapper.warm()
 
     # Disable the outer round-counter bar when there's only one round to process
     # (the per-slice intra-round bar below is more useful in that case).

@@ -351,6 +351,29 @@ def main(args = None):
                    f"[cyan]--check_alignment[/cyan]")
         else:
             rprint(f"[bold green]Pipeline completed successfully for {full_manifest['data']['mouse_name']}![/bold green]")
+            # A run that says only "completed" leaves you to go looking. Name the two
+            # files worth opening and the notebook that draws them, in that order:
+            # the result, then whether the alignment behind it can be trusted.
+            out = mt.output_root(full_manifest)
+            features = out / 'MERGED' / 'aligned_extracted_features'
+            qc = out / '2P' / 'registered' / 'QualityCheck'
+            # Absolute, from this file's own location: the run may have been started from
+            # anywhere, and a relative demo/ path only resolves at the repo root.
+            explore_nb = Path(__file__).resolve().parent / 'demo' / 'explore_results.ipynb'
+            explore_py = Path(__file__).resolve().parent / 'demo' / 'explore_results.py'
+            rprint("")
+            rprint(f"  Results        [yellow]{features}[/yellow]")
+            rprint(f"                 [dim]one row per HCR FISH cell: matched 2P cell, "
+                   f"per-gene intensities, match scores[/dim]")
+            rprint(f"  Alignment QC   [yellow]{qc}[/yellow]")
+            rprint(f"                 [dim]plane*_AFTER_registration_overlay.tiff — open this "
+                   f"to judge whether the cross-modal fit worked[/dim]")
+            if explore_nb.exists() or explore_py.exists():
+                rprint("")
+                rprint(f"  Explore it     [cyan]jupyter lab {explore_nb}[/cyan]")
+                rprint(f"                 [cyan]python {explore_py} --output {out}[/cyan]")
+                rprint(f"                 [dim]match rates, per-cell IoU, and where the plane "
+                       f"landed in the volume[/dim]")
         rprint('='*80)
 
 
