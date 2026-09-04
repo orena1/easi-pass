@@ -7,9 +7,9 @@ import pandas as pd
 from pathlib import Path
 
 try:
-    from .meta import rprint, Prompt, pause, flush_input  # Relative import (running as part of a package)
+    from .meta import rprint, rprint_path, pause  # Relative import (running as part of a package)
 except ImportError:
-    from meta import rprint, Prompt, pause, flush_input  # Absolute import (running in Jupyter notebook)
+    from meta import rprint, rprint_path, pause  # Absolute import (running in Jupyter notebook)
 
 
 def find_landmark_file(base_dir, plane, prefix="", suffix="_landmarks.csv", hcr_ref="1"):
@@ -143,46 +143,31 @@ def export_landmarks_to_bigwarp_csv(output_path, landmarks_df, pixel_spacing):
     return output_path
 
 
-def prompt_registration_checkpoint(qa_paths, auto_landmarks_path, step_name, plane_idx):
+def report_registration_checkpoint(qa_paths, auto_landmarks_path, step_name, plane_idx):
     """
-    Interactive checkpoint after auto-registration.
+    Say what auto-registration wrote, and how to change it. The run continues.
 
-    Returns
-    -------
-    str: "accept", "refine", or "skip"
+    This used to hold the run open on a y/r/n prompt. Both files below stay on
+    disk, so the alignment can be judged and the landmarks edited after the run
+    finishes, and a long run no longer waits on someone being at the terminal.
     """
     rprint(f"\n[bold cyan]{'='*60}[/bold cyan]")
     rprint(f"[bold green]Plane {plane_idx}: Auto-{step_name} Complete[/bold green]")
     rprint(f"[bold cyan]{'='*60}[/bold cyan]\n")
 
-    rprint("[bold]Check these overlays in ImageJ/Fiji:[/bold]")
+    rprint("[bold]Overlays to check in ImageJ/Fiji:[/bold]")
     for i, path in enumerate(qa_paths):
         label = "before" if i == 0 else " after"
-        rprint(f"  {label}: [blue]{path}[/blue]")
+        rprint_path(f"  {label}: [yellow]{path}[/yellow]")
 
     # Named for what it holds: the placed landmarks with the rigid whole-plane shift
     # added to the target side, and nothing after it. "Refined" left readers assuming
     # the affine and the tile cascade were baked in as well.
     rprint("\n[bold]Landmarks auto-adjusted by the rigid shift saved as:[/bold]")
-    rprint(f"  [yellow]{auto_landmarks_path}[/yellow]")
+    rprint_path(f"  [yellow]{auto_landmarks_path}[/yellow]")
 
-    rprint("\n[bold]Then choose:[/bold]")
-    rprint("  \\[[green]y[/green]] accept these results")
-    rprint("  \\[[yellow]r[/yellow]] edit that file in BigWarp, then re-run")
-    rprint("  \\[[red]n[/red]] skip this plane\n")
-
-    flush_input()   # don't let Enters tapped during the auto-registration answer this
-    choice = Prompt.ask("Accept, refine, or skip?", choices=["y", "r", "n"], default="y")
-
-    if choice == "y":
-        return "accept"
-    elif choice == "r":
-        rprint(f"\n[yellow]Edit and save, then press Enter:[/yellow]")
-        rprint(f"  {auto_landmarks_path}")
-        pause("Press Enter when ready...")
-        return "refine"
-    else:
-        return "skip"
+    rprint("\n[dim]  The run carries on from here. To change this alignment, edit those[/dim]")
+    rprint("[dim]  landmarks in BigWarp and re-run to apply them.[/dim]")
 
 
 def print_plane_summary(results):

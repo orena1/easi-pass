@@ -28,11 +28,11 @@ from tqdm.auto import tqdm
 try:
     from .registrations import verify_rounds  # Relative import (running as part of a package)
     from .functional import get_number_of_suite2p_planes
-    from .meta import get_intensity_extraction_config, get_round_folder_name, output_root, rprint, pause
+    from .meta import get_intensity_extraction_config, get_round_folder_name, output_root, rprint, rprint_path, pause
 except ImportError:
     from registrations import verify_rounds  # Absolute import (running in Jupyter notebook)
     from functional import get_number_of_suite2p_planes
-    from meta import get_intensity_extraction_config, get_round_folder_name, output_root, rprint, pause
+    from meta import get_intensity_extraction_config, get_round_folder_name, output_root, rprint, rprint_path, pause
 
 
 
@@ -407,7 +407,8 @@ def _filter_implausible_hcr_masks(masks: np.ndarray) -> tuple:
     from scipy.ndimage import find_objects
 
     counts = dict(total=0, kept=0, tiny=0, huge_vol=0, huge_xy=0,
-                  median_vol=0.0, median_bbox=0.0)
+                  median_vol=0.0, median_bbox=0.0,
+                  min_vol=0.0, max_vol=0.0, max_bbox=0.0)
     if masks.max() == 0:
         return masks, counts
 
@@ -439,6 +440,9 @@ def _filter_implausible_hcr_masks(masks: np.ndarray) -> tuple:
     min_vol      = HCR_MASK_VOL_MIN_FRAC  * med_vol
     max_vol      = HCR_MASK_VOL_MAX_FRAC  * med_vol
     max_bbox_ext = HCR_MASK_BBOX_MAX_FRAC * med_bbox
+    counts['min_vol']  = min_vol
+    counts['max_vol']  = max_vol
+    counts['max_bbox'] = max_bbox_ext
 
     drop_mask = np.zeros(len(vols), dtype=bool)
     for i, lbl in enumerate(present):
@@ -612,9 +616,19 @@ def run_cellpose(full_manifest):
             masks, _, _ = model_wrapper.eval(cellpose_input, progress=pb)
 
         masks, fc = _filter_implausible_hcr_masks(masks)
-        rprint(f"  {round_folder_name}: kept {fc['kept']}/{fc['total']} masks "
-               f"(dropped {fc['tiny']} tiny + {fc['huge_vol']} huge_vol + {fc['huge_xy']} huge_xy; "
-               f"median vol={fc['median_vol']:.0f} vox, bbox={fc['median_bbox']:.0f} px)")
+        # Sizes are judged against this volume's own median cell, so the cutoffs
+        # are printed in voxels and pixels. A reader should not have to know the
+        # fractions to see why a cell was dropped.
+        if fc['median_vol'] > 0:
+            rprint(f"  {round_folder_name}: kept {fc['kept']}/{fc['total']} cells. "
+                   f"Median cell is {fc['median_vol']:.0f} voxels, "
+                   f"{fc['median_bbox']:.0f} px wide in xy")
+            if fc['kept'] != fc['total']:
+                rprint(f"    dropped {fc['tiny']} under {fc['min_vol']:.0f} voxels, "
+                       f"{fc['huge_vol']} over {fc['max_vol']:.0f} voxels, "
+                       f"{fc['huge_xy']} wider than {fc['max_bbox']:.0f} px")
+        else:
+            rprint(f"  {round_folder_name}: {fc['total']} cells, too few to filter on size")
 
         # A zero-cell result is a failure, not an answer. Writing it caches an
         # empty mask file that every later run skips over as "already done", so
@@ -723,7 +737,7 @@ def verify_2p_cellpose_segmentations(seg_files: list):
         return
     rprint("\n[bold]Verify 2P cellpose segmentations:[/bold]")
     for plane, path in seg_files:
-        rprint(f"  plane {plane}: [yellow]{path}[/yellow]")
+        rprint_path(f"  plane {plane}: [yellow]{path}[/yellow]")
     rprint("\nOpen any plane that needs editing in the Cellpose GUI, then press [green]Enter[/green] to continue...")
     pause()
 
@@ -732,10 +746,13 @@ def compute_M(data):
     return csr_matrix((cols, (data.ravel(), cols)),
                       shape=(data.max() + 1, data.size))
 
-def get_indices_sparse(data):
+def get_indices_sparse(data, desc="Indexing masks"):
     M = compute_M(data)
     inds = []
-    for row in tqdm(M):
+    # Iterating a csr_matrix yields rows but has no len(), so tqdm showed a
+    # bare "1440it" with no name and no total. Row 0 is the background label,
+    # which is why the count is one above the cell count.
+    for row in tqdm(M, total=M.shape[0], desc=desc):
         inds.append(np.unravel_index(row.data, data.shape))
     return inds
 
@@ -1648,7 +1665,7 @@ def align_masks(full_manifest: dict,
             mask1_to_mask2_df = match_masks(masks_2p_aligned_3d_path, reference_round_masks,
                                             neighborhood_window_px=_nbhd_win)
             mask1_to_mask2_df.to_csv(save_path)
-            rprint(f"[green]✓ Saved mask matching to {save_path}[/green]")
+            rprint_path(f"[green]✓ Saved mask matching to {save_path}[/green]")
             matching_results.append((f"2P plane {plane}", f"HCR{reference_round['round']}", mask1_to_mask2_df))
     else:
         # Match masks using automated registration output
@@ -1656,7 +1673,7 @@ def align_masks(full_manifest: dict,
         mask1_to_mask2_df = match_masks(masks_2p_aligned_3d_path, reference_round_masks,
                                         neighborhood_window_px=_nbhd_win)
         mask1_to_mask2_df.to_csv(save_path)
-        rprint(f"[green]✓ Saved mask matching to {save_path}[/green]")
+        rprint_path(f"[green]✓ Saved mask matching to {save_path}[/green]")
         matching_results.append((f"2P plane {plane}", f"HCR{reference_round['round']}", mask1_to_mask2_df))
 
     # Print summary of all matching results

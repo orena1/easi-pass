@@ -17,13 +17,16 @@ images, and roughly 450 MB the run itself writes under `OUTPUT/`.
 
 ## Prompts
 
-The run pauses three times:
+The run pauses twice:
 
 | Prompt | Answer |
 |---|---|
 | `Verify 2P cellpose segmentations … press Enter` | **Enter** |
 | `Overwrite? [y/n]` (low-res to hi-res step) | **n**, which keeps the shipped 2P placement. Answering `y` recomputes it and the demo may no longer reproduce |
-| `After checking QA images, choose [y/r/n]` (2P to HCR FISH) | **y** |
+
+After the 2P to HCR FISH registration the run prints the QA overlays and the adjusted
+landmarks, then carries on without asking. Judge the overlay once the run finishes, and
+if the alignment needs work, edit the landmarks and re-run.
 
 ## Expected output
 

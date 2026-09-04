@@ -108,6 +108,9 @@ def _resolve_hcr_path(expected_path: Path, alt_stems=()) -> Path:
     return expected_path
 
 
+_ROUNDS_ANNOUNCED = set()
+
+
 def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
     """
     print instructions on how to register the HCR data round to round
@@ -175,11 +178,17 @@ def HCR_confocal_imaging(manifest, only_paths=False, require_all_rounds=True):
 
         if not missing_files:
             pending = [i for i in mov_rounds if not i.exists()]
-            if pending:
-                rprint(f"[green]Reference round found[/green] "
-                       f"[dim]({len(pending)} later round(s) not yet acquired)[/dim]")
-            else:
-                rprint("[green]All HCR round files found[/green]")
+            # verify_rounds() runs at the start of every stage, so this check
+            # fires several times per run. Say it once, and again only if the
+            # answer changes because a later round arrived mid-run.
+            state = (str(reference_round), len(pending))
+            if state not in _ROUNDS_ANNOUNCED:
+                _ROUNDS_ANNOUNCED.add(state)
+                if pending:
+                    rprint(f"[green]Reference round found[/green] "
+                           f"[dim]({len(pending)} later round(s) not yet acquired)[/dim]")
+                else:
+                    rprint("[green]All HCR round files found[/green]")
             break
 
         rprint(f"\n[bold yellow]Missing HCR round files:[/bold yellow]")
@@ -1291,7 +1300,8 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
            f"y=[{landmarks_df['hcr_y'].min():.0f}, {landmarks_df['hcr_y'].max():.0f}][/dim]")
     rprint(f"[dim]  Landmark HCR coords (px): x=[{landmarks_df['hcr_x_px'].min():.0f}, {landmarks_df['hcr_x_px'].max():.0f}], "
            f"y=[{landmarks_df['hcr_y_px'].min():.0f}, {landmarks_df['hcr_y_px'].max():.0f}][/dim]")
-    rprint(f"[dim]  HCR resolution: {hcr_resolution}[/dim]")
+    rprint(f"[dim]  HCR resolution: "
+           f"[{', '.join(f'{v:.2f}' for v in hcr_resolution)}] um/px[/dim]")
 
     # Load HCR reference masks
     hcr_ref_masks = tif_imread(str(hcr_ref_masks_path))
@@ -1348,7 +1358,9 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
     # Store results for each plane
     plane_results = {}
     for plane in TARGET_PLANES:
-        ref_marker = "*" if plane == REFERENCE_PLANE else ""
+        # Spelled out, because a bare "*" next to a plane number tells a reader
+        # nothing about which plane the landmarks came from.
+        ref_marker = ", the reference plane" if plane == REFERENCE_PLANE else ""
         n_cells = len(np.unique(twop_2d_planes[plane])) - 1
         rprint(f"Plane {plane}{ref_marker} ({n_cells} cells):")
 
@@ -1415,7 +1427,7 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
         hcr_global = sample_hcr_binary_at_zmap(hcr_3d_bin_crop, z_map_global)
         iou_global = compute_iou(twop_global_binary, hcr_global, fov_mask=fov_global)
         cont_global = compute_containment(twop_global_binary, hcr_global, fov_mask=fov_global)
-        rprint(f"  [dim]Global: IoU {iou_baseline:.3f}→{iou_global:.3f} | cont {cont_baseline:.3f}→{cont_global:.3f} "
+        rprint(f"  [dim]Global: IoU {iou_baseline:.2f}→{iou_global:.2f} | cont {cont_baseline:.2f}→{cont_global:.2f} "
                f"(dy={g_dy:+d}, dx={g_dx:+d}, dz={g_dz:+d})[/dim]")
 
         # Sanity check: large XY shifts must justify themselves with proportional IoU
@@ -2010,26 +2022,13 @@ def twop_to_hcr_registration(full_manifest, session, has_hires=False, automation
             qa_folder / f'plane{REFERENCE_PLANE}_BEFORE_registration_overlay.tiff',
             qa_folder / f'plane{REFERENCE_PLANE}_AFTER_registration_overlay.tiff'
         ]
-        choice = auto.prompt_registration_checkpoint(
+        # Reports and continues. The aligned volume, the QA overlays and the
+        # _auto.csv landmarks are all on disk by now, so the alignment can be
+        # judged after the run and the landmarks edited for a re-run. A long
+        # run no longer waits here for someone to be at the terminal.
+        auto.report_registration_checkpoint(
             qa_paths, ref_auto_path, "2P-to-HCR", REFERENCE_PLANE
         )
-
-        # Returning here would only exit this function: the aligned volume is
-        # already written, and the caller would go on to match, merge and report
-        # success on an alignment the user just rejected. Stop the run instead.
-        if choice == "skip":
-            raise SystemExit(
-                "\nRegistration skipped at the QA checkpoint.\n"
-                "The aligned volume and QA overlays for this plane are on disk, but nothing "
-                "downstream has run -- matching and merging on a rejected alignment would "
-                "produce a table that looks complete and is not.\n"
-                f"  Landmarks: {ref_auto_path}")
-        elif choice == "refine":
-            raise SystemExit(
-                "\nRefinement requested at the QA checkpoint.\n"
-                "Per-plane _auto.csv landmarks are saved. Edit them and re-run to apply.\n"
-                f"  Landmarks: {ref_auto_path}")
-        # accept: continue normally
     elif not automation_enabled and CURRENT_PLANE == REFERENCE_PLANE:
         # Only prompt for review on reference plane in manual mode
         rprint(f"\n[green]Alignment complete.[/green]")

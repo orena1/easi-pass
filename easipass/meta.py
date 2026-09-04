@@ -12,8 +12,23 @@ try:
     from rich import print as rprint
     from rich.progress import track
     from rich.prompt import Prompt
+    from rich.console import Console
+
+    # rprint is rich.print, which wraps at the console width. On a long path
+    # that puts a line break in the middle of the path, and a path split
+    # across two lines cannot be copied out of the terminal. Paths print
+    # through a console that does not wrap. soft_wrap belongs to
+    # Console.print; rich.print does not take it.
+    _nowrap = Console()
+
+    def rprint_path(text):
+        _nowrap.print(text, soft_wrap=True)
+
 except ImportError:
     rprint = print
+
+    def rprint_path(text):
+        print(text)
 
     def track(iterable, *args, **kwargs):
         return iterable

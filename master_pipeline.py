@@ -9,7 +9,7 @@ try:
     from easipass import meta as mt
     from easipass import segmentation as sg
     from easipass import importers as im
-    from easipass.meta import rprint
+    from easipass.meta import rprint, rprint_path
 except ImportError as exc:
     # Each easipass module falls back to a flat import so it can also be used from a
     # notebook. That fallback masks the real cause: a missing third-party package
@@ -362,16 +362,27 @@ def main(args = None):
             explore_nb = Path(__file__).resolve().parent / 'demo' / 'explore_results.ipynb'
             explore_py = Path(__file__).resolve().parent / 'demo' / 'explore_results.py'
             rprint("")
-            rprint(f"  Results        [yellow]{features}[/yellow]")
+            rprint_path(f"  Results        [yellow]{features}[/yellow]")
             rprint(f"                 [dim]one row per HCR FISH cell: matched 2P cell, "
                    f"per-gene intensities, match scores[/dim]")
-            rprint(f"  Alignment QC   [yellow]{qc}[/yellow]")
+            rprint_path(f"  Alignment QC   [yellow]{qc}[/yellow]")
             rprint(f"                 [dim]plane*_AFTER_registration_overlay.tiff — open this "
                    f"to judge whether the cross-modal fit worked[/dim]")
-            if explore_nb.exists() or explore_py.exists():
+            # The notebook opens on a hard-coded OUTPUT path, the demo's own, so it
+            # is only a one-step suggestion for the demo. Any other run gets the
+            # script, which takes the path as an argument, and the notebook only as
+            # an aside that says it needs pointing first.
+            is_demo = 'demo_pre_run' in out.parts
+            if explore_py.exists() or explore_nb.exists():
                 rprint("")
-                rprint(f"  Explore it     [cyan]jupyter lab {explore_nb}[/cyan]")
-                rprint(f"                 [cyan]python {explore_py} --output {out}[/cyan]")
+                if is_demo and explore_nb.exists():
+                    rprint_path(f"  Explore it     [cyan]jupyter lab {explore_nb}[/cyan]")
+                    rprint_path(f"                 [cyan]python {explore_py} --output {out}[/cyan]")
+                else:
+                    rprint_path(f"  Explore it     [cyan]python {explore_py} --output {out}[/cyan]")
+                    if explore_nb.exists():
+                        rprint_path(f"                 [dim]or {explore_nb}, with OUTPUT "
+                                    f"at the top set to this run[/dim]")
                 rprint(f"                 [dim]match rates, per-cell IoU, and where the plane "
                        f"landed in the volume[/dim]")
         rprint('='*80)
