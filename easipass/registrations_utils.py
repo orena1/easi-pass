@@ -547,7 +547,7 @@ def resolve_hcr_resolution(tiff_path, manifest_resolution=None, tolerance=0.05,
                   f"{name} {[round(v, 4) for v in tiff_res]} by {max_frac*100:.1f}% "
                   f"(> {tolerance*100:.0f}%); using TIFF metadata. Fix or remove the manifest value.")
     print(f"  HCR resolution from {name}: "
-          f"[{tiff_res[0]:.4f}, {tiff_res[1]:.4f}, {tiff_res[2]:.4f}] um/px")
+          f"[{tiff_res[0]:.2f}, {tiff_res[1]:.2f}, {tiff_res[2]:.2f}] um/px")
     return tiff_res
 
 
@@ -1880,7 +1880,7 @@ def global_search_moving_iou(twop_binary, hcr_3d_binary, z_map, mask,
         if score > best['iou']:
             best = {'iou': score, 'theta': 0.0, 'dz': int(dz), 'dy': dy, 'dx': dx}
 
-    print(f"  Best: IoU={best['iou']:.4f} dy={best['dy']:+d} dx={best['dx']:+d} dz={best['dz']:+d}")
+    print(f"  Best: IoU={best['iou']:.2f} dy={best['dy']:+d} dx={best['dx']:+d} dz={best['dz']:+d}")
     return best
 
 
@@ -2288,10 +2288,18 @@ def fit_affine_ransac(df, min_iou, min_gain, residual_thresh,
     good = good.copy()
     good['inlier'] = best_inliers
     print(f"  RANSAC inliers: {best_n_inliers} / {len(good)}")
-    print(f"  Affine dy [y, x, 1]: {best_affine['A_dy']}")
-    print(f"  Affine dx [y, x, 1]: {best_affine['A_dx']}")
-    print(f"  Z model  [y, x, 1]: {best_z_model}")
-    print(f"  Deformation SVs: {svs_final}  (valid: [{1 - max_scale_dev:.1f}, {1 + max_scale_dev:.1f}])")
+
+    # Each model is offset + two gradients. Printed as the equation it is, since
+    # the raw array put the gradients in scientific notation and hid the offset,
+    # which is the number worth reading.
+    def _plane(a, unit=" px"):
+        return f"{a[2]:+.2f}{unit} {a[0]:+.4f}*y {a[1]:+.4f}*x"
+
+    print(f"  Affine dy: {_plane(best_affine['A_dy'])}")
+    print(f"  Affine dx: {_plane(best_affine['A_dx'])}")
+    print(f"  Z model:   {_plane(best_z_model, ' z')}")
+    print(f"  Deformation SVs: {svs_final[0]:.3f}, {svs_final[1]:.3f}  "
+          f"(valid {1 - max_scale_dev:.1f} to {1 + max_scale_dev:.1f})")
     return best_affine, best_z_model, good
 
 

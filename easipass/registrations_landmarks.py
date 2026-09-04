@@ -138,7 +138,7 @@ def register_lowres_to_hires_landmarks(full_manifest, session):
     # Process each plane
     for plane_idx in TARGET_PLANES:
         is_reference = (plane_idx == REFERENCE_PLANE)
-        ref_marker = " (ref)" if is_reference else ""
+        ref_marker = ", the reference plane" if is_reference else ""
         print(f"\nPlane {plane_idx}{ref_marker}:")
 
         # --- LOAD FILES ---
