@@ -971,7 +971,19 @@ def extract_probe_intensity(full_manifest):
             channels_names = round_to_rounds[HCR_round_to_register]['channels']
         output_folder = output_root(full_manifest) / 'HCR' / 'extract_intensities'
         pkl_output_path = output_folder / f"{round_folder_name}_probs_intensities.pkl"
-        if not pkl_output_path.exists():
+        # Re-extract when the table is MISSING or OLDER than the masks it was measured on.
+        # Existence alone was the gate until 2026-09-16, and it silently served June tables
+        # against September masks: re-segmenting renumbers every label, so the mask_ids in the
+        # old table refer to cells that no longer exist, and the merged tables join on them
+        # anyway. Intensities are measured on the ACQUIRED frame, so the cellpose/ mask is the
+        # only input that can invalidate them -- a changed registration cannot.
+        mask_src = output_root(full_manifest) / 'HCR' / 'cellpose' / f"{round_folder_name}_masks.tiff"
+        stale = (pkl_output_path.exists() and mask_src.exists()
+                 and mask_src.stat().st_mtime > pkl_output_path.stat().st_mtime)
+        if stale:
+            rprint(f"  [yellow]HCR{HCR_round_to_register}: masks are newer than the intensity "
+                   f"table — re-extracting[/yellow]")
+        if not pkl_output_path.exists() or stale:
             to_process.append((HCR_round_to_register, round_folder_name, channels_names))
         else:
             # Already extracted -- the numbers stand, but the manifest may have corrected a name.

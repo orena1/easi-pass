@@ -329,12 +329,19 @@ def get_automation_config(params):
     - stitching: 'auto' or 'manual'
         - 'manual' (default): User-provided BigStitcher coordinates
         - 'auto': Automated SIFT + phase correlation stitching
+    - hcr_to_hcr: 'auto' or 'manual'
+        - 'manual' (default): both centroid-registration review prompts block for a human pick
+        - 'auto': no prompts. Each round takes the row its select_metric favours (coarse) and
+          the top-ranked local candidate (fine), an already-finished round is kept rather than
+          recomputed, and every pick is written to registrations/registration_summary.csv with
+          its metrics and red-flag verdict for review after the run.
     """
     automation = params.get('automation', {})
     return {
         'twop_to_hcr': automation.get('twop_to_hcr', 'manual'),
         'lowres_to_hires': automation.get('lowres_to_hires', 'manual'),
         'stitching': automation.get('stitching', 'manual'),
+        'hcr_to_hcr': automation.get('hcr_to_hcr', 'manual'),
     }
 
 def check_rotation(manifest):

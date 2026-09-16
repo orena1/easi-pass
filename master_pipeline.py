@@ -127,6 +127,13 @@ def _parse_args(argv=None):
                         help='FISH rounds + segmentation only; skip the functional side. '
                              'Inferred automatically when the manifest has no two_photon_imaging '
                              'section; pass it explicitly to skip the 2P half of a full manifest.')
+    parser.add_argument('--auto_hcr_registration', action='store_true',
+                        help='Run the HCR round-to-round registration with no review prompts: '
+                             'the coarse row goes to the manifest select_metric, the fine row to '
+                             'the top-ranked candidate, and a round that is already registered is '
+                             'kept. Every pick, its metrics and its red-flag verdict land in '
+                             'OUTPUT/HCR/registrations/registration_summary.csv to review after '
+                             'the run. Same as params.automation.hcr_to_hcr: "auto".')
     parser.add_argument('--check_alignment', action='store_true',
                         help='Stop after registering and matching 2P to the reference FISH round. '
                              'Later rounds need not be acquired yet; re-run without the flag to finish.')
@@ -171,6 +178,9 @@ def _print_resolved_config(full_manifest, args, has_hires):
         rprint(f"  hi-res bridge   {'yes' if has_hires else 'no'}")
 
     rprint(f"  FISH rounds     {len(rounds)} ({', '.join(str(r['round']) for r in rounds)}), reference {ref}")
+    if getattr(args, 'auto_hcr_registration', False):
+        rprint("  HCR→HCR reg     [yellow]unattended: no review prompts, verdicts to "
+               "registration_summary.csv[/yellow]")
     if len(rounds) == 1:
         rprint("                  [dim]single round: no round-to-round registration[/dim]")
     rprint("")
@@ -189,6 +199,7 @@ def main(args = None):
     # Parse the manifest file
     full_manifest = mt.main_pipeline_manifest(args.manifest)
     full_manifest['check_alignment'] = getattr(args, 'check_alignment', False)
+    full_manifest['auto_hcr_registration'] = getattr(args, 'auto_hcr_registration', False)
     specs, has_hires = mt.verify_manifest(full_manifest, args)
 
     if args.only_hcr:

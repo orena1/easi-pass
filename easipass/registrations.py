@@ -9,11 +9,13 @@ from pathlib import Path
 
 try:
     from .meta import (parse_json, get_hcr_to_hcr_registration_config, get_rotation_config, rprint, track,
-                       get_round_folder_name, flush_input, pause)  # Relative import (for running as part of a package)
+                       get_round_folder_name, flush_input, pause,
+                       get_automation_config)  # Relative import (for running as part of a package)
     from . import automation as auto
 except ImportError:
     from meta import (parse_json, get_hcr_to_hcr_registration_config, get_rotation_config, rprint, track,
-                      get_round_folder_name, flush_input, pause)  # Absolute import (for running in Jupyter Notebook)
+                      get_round_folder_name, flush_input, pause,
+                      get_automation_config)  # Absolute import (for running in Jupyter Notebook)
     import automation as auto
 
 try:
@@ -300,13 +302,42 @@ def align_masks_to_reference(full_manifest):
     # Reference round is the fix: acquired frame == reference frame, so just publish it.
     ref_name = get_round_folder_name(ref, ref)
     ref_src, ref_out = src_dir / f"{ref_name}_masks.tiff", out_dir / f"{ref_name}_masks.tiff"
-    if ref_src.exists() and not ref_out.exists():
+    if ref_src.exists() and (not ref_out.exists()
+                             or ref_src.stat().st_mtime > ref_out.stat().st_mtime):
         shutil.copyfile(ref_src, ref_out)
 
-    pending = [r for r in register_rounds
-               if not (out_dir / f"{get_round_folder_name(r, ref)}_masks.tiff").exists()]
+    def _stale(r):
+        """Rebuild this round's aligned mask when it is MISSING or OLDER than what it is made
+        from -- its cellpose mask, or the registration it is warped by.
+
+        Existence alone is not enough. Re-register a round (or re-segment it) and the old warped
+        mask sits there looking finished, so the MERGED tables silently describe the previous
+        transform. That is not hypothetical: it happened on 2026-09-15 when a rejected
+        registration's aligned masks survived a restore, and it is the same shape of bug that
+        left June intensity tables in front of September masks."""
+        out = out_dir / f"{get_round_folder_name(r, ref)}_masks.tiff"
+        if not out.exists():
+            return True
+        t = out.stat().st_mtime
+        src = src_dir / f"{get_round_folder_name(r, ref)}_masks.tiff"
+        if src.exists() and src.stat().st_mtime > t:
+            return True
+        try:                                   # the selected registration's own products
+            reg = output_root(full_manifest) / 'HCR' / 'registrations' / get_round_folder_name(r, ref) \
+                / Path(round_to_rounds[r]['registrations'][0])
+            return any((reg / n).exists() and (reg / n).stat().st_mtime > t
+                       for n in ('_affine.mat', 'deform.zarr'))
+        except Exception:
+            return False                       # unreadable selection -> leave it alone
+
+    pending = [r for r in register_rounds if _stale(r)]
     if not pending:
         return
+    redone = [r for r in pending
+              if (out_dir / f"{get_round_folder_name(r, ref)}_masks.tiff").exists()]
+    if redone:
+        rprint(f"  [yellow]re-aligning {len(redone)} round(s) whose masks or registration "
+               f"changed:[/yellow] {', '.join('HCR'+str(r) for r in redone)}")
     # Reference DAPI grid, widened to int32 so warped label IDs aren't clipped to
     # the uint8 range (the values are unused; only the grid shape defines the output).
     fix_int32 = tif_imread(reference_round['image_path'])[:, 0].transpose(2, 1, 0).astype(np.int32)
@@ -424,13 +455,22 @@ def register_rounds(full_manifest):
         from .hcr_centroid_registration import get_centroid_config
     except ImportError:
         from hcr_centroid_registration import get_centroid_config
-    gcfg, lcfg, _ds = get_centroid_config(parse_json(full_manifest['manifest_path'])['params'])
+    _params = parse_json(full_manifest['manifest_path'])['params']
+    gcfg, lcfg, _ds = get_centroid_config(_params)
     centroid_mode = (gcfg is not None
                      and gcfg.get('method', 'centroid') == 'centroid'
                      and lcfg.get('method', 'centroid') == 'centroid')
 
+    # Unattended mode: no review prompts, picks taken from the metrics, verdict written to
+    # registration_summary.csv for review afterwards. Either the manifest asks for it
+    # (params.automation.hcr_to_hcr) or the CLI flag does, and the flag cannot be un-set by
+    # the manifest -- a run launched with --auto_hcr_registration is one nobody is watching.
+    unattended = (get_automation_config(_params)['hcr_to_hcr'] == 'auto'
+                  or bool(full_manifest.get('auto_hcr_registration')))
+
     if centroid_mode:
-        _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, _ds)
+        _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, _ds,
+                                  unattended=unattended)
     else:
         _register_rounds_legacy(full_manifest)
 
@@ -491,7 +531,8 @@ def _register_rounds_legacy(full_manifest):
         rprint("   [yellow]⚠️  No rounds ready for registration[/yellow]")
 
 
-def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds):
+def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds,
+                              unattended=False):
     """In-pipeline centroid registration. TWO review points per round, both the same shape:
     every candidate is computed and written to disk with a composite tiff, the metrics only
     SUGGEST a row, and the user picks by index after inspecting the tiffs.
@@ -499,30 +540,51 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
       COARSE — asked mid-run (inside the driver, via the choose_global callback) because the
                expensive deform is seeded by the chosen affine.
       FINE   — asked here, once the blocksizes for that round are done.
+
+    `unattended=True` removes both prompts: the coarse row is whichever one gcfg['select_metric']
+    favours, the fine row is the top-ranked candidate, and an already-finished round is kept
+    rather than recomputed. Nothing else changes -- every candidate is still computed, written
+    and listed, so a pick can be overridden afterwards by editing HCR_selected_registrations.
+    The review does not disappear, it moves after the run: registration_summary.csv carries each
+    round's metrics, its red-flag verdict and the path to its overlay.
     """
     try:
         from .hcr_centroid_registration import run_hcr_centroid_registration
     except ImportError:
         from hcr_centroid_registration import run_hcr_centroid_registration
 
+    if unattended:
+        rprint("[bold yellow]Unattended registration[/bold yellow] — no review prompts. Coarse row "
+               f"by [b]{gcfg.get('select_metric', 'mi')}[/b], fine row by rank, finished rounds kept.")
+        rprint("  [dim]Verdicts land in registrations/registration_summary.csv — read it before "
+               "quoting anything from these rounds.[/dim]")
+
     rprint("[bold]Computing centroid global + local registration (this runs the real pipeline; "
            "may take a while per round)...[/bold]")
-    results = run_hcr_centroid_registration(full_manifest, round_to_rounds, reference_round,
-                                            gcfg, lcfg, ds, choose_global=_choose_global_interactive,
-                                            confirm_overwrite=_confirm_round_overwrite)
+    results = run_hcr_centroid_registration(
+        full_manifest, round_to_rounds, reference_round, gcfg, lcfg, ds,
+        # None = take the suggestion. Keeping the driver's own table print, so an unattended
+        # run's log still holds every radius and its metrics.
+        choose_global=None if unattended else _choose_global_interactive,
+        # Unattended: keep whatever is already finished. That makes a re-run resume instead of
+        # spending ~30 min per round recomputing a deform that is already on disk.
+        confirm_overwrite=(lambda rnd, ref, done: False) if unattended else _confirm_round_overwrite)
 
     chosen = {}   # round -> "global_tag/local_tag"
+    summary = []  # one row per round, for the post-run review file
     for rnd, res in results.items():
         if res.get('skipped'):
-            # Kept by the user at the overwrite gate: carry its existing selection forward so the
-            # apply step still runs, and don't re-ask either review question for it.
+            # Kept at the overwrite gate: carry its existing selection forward so the apply step
+            # still runs, and don't re-ask either review question for it.
             chosen[str(rnd)] = res['tag']
+            summary.append(_summary_row(rnd, res, None, 'kept'))
             rprint(f"\n[bold]HCR{rnd} → HCR{reference_round['round']}[/bold] — kept existing "
                    f"registration: [cyan]{res['tag']}[/cyan]")
             continue
         cands = res.get('candidates', [])
         if not cands:
             rprint(f"[red]HCR{rnd}: no local candidates produced — skipping (check masks/logs)[/red]")
+            summary.append(_summary_row(rnd, res, None, 'FAILED'))
             continue
         rprint(f"\n[bold]HCR{rnd} → HCR{reference_round['round']} — fine candidates "
                f"(all saved; ranked by MI):[/bold]")
@@ -545,16 +607,36 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
         if sev == 2:
             rprint("  [red]↳ top pick is RED-FLAGGED — inspect the overlay before accepting.[/red]")
         best = cands[0]
-        rows = ", ".join(str(i) for i in range(len(cands)))
-        rprint(f"  [green]Suggested: row 0[/green] ({best['local_tag']})")
-        rprint("  Open the overlay images above. Press [green]Enter[/green] to accept the "
-               "suggested registration.")
-        rprint(f"  Otherwise, enter a row # ({rows}) to override:")
-        # pause(), not input(): drops Enters typed during the silent deform above, which would
-        # otherwise be read as "accept the suggestion" without the prompt ever stopping.
-        chosen_cand = _resolve_candidate(pause().strip(), cands)
+        if unattended:
+            chosen_cand = best
+            rprint(f"  [yellow]auto-selected row 0[/yellow] ({best['local_tag']})")
+        else:
+            rows = ", ".join(str(i) for i in range(len(cands)))
+            rprint(f"  [green]Suggested: row 0[/green] ({best['local_tag']})")
+            rprint("  Open the overlay images above. Press [green]Enter[/green] to accept the "
+                   "suggested registration.")
+            rprint(f"  Otherwise, enter a row # ({rows}) to override:")
+            # pause(), not input(): drops Enters typed during the silent deform above, which would
+            # otherwise be read as "accept the suggestion" without the prompt ever stopping.
+            chosen_cand = _resolve_candidate(pause().strip(), cands)
         chosen[str(rnd)] = chosen_cand['tag']
+        summary.append(_summary_row(rnd, res, chosen_cand, 'auto' if unattended else 'picked'))
         rprint(f"  [green]selected[/green] HCR{rnd}: {chosen_cand['tag']}")
+        # Record the selection NOW, not after the last round. A run that dies (or is killed at
+        # a prompt) used to leave finished rounds unrecorded, so the next run recomputed every
+        # one of them from scratch; with the entry on disk, completed_round() sees them.
+        _record_selection(full_manifest['manifest_path'], str(rnd), chosen_cand['tag'])
+
+    # A round whose masks were missing never reaches `results` at all -- the driver prints and
+    # moves on. In an attended run that line is on screen; in an unattended one nobody is
+    # reading, so the summary has to say the round was never attempted rather than omit it.
+    for rnd in round_to_rounds:
+        if rnd not in results:
+            summary.append(_summary_row(
+                rnd, dict(severity=2, flags=['round never attempted — mask file missing']),
+                None, 'MISSING'))
+    summary.sort(key=lambda r: str(r['round']))
+    _write_summary(full_manifest, summary)
 
     if not chosen:
         rprint("[yellow]No registrations selected; nothing written or applied.[/yellow]")
@@ -567,6 +649,86 @@ def _register_rounds_centroid(full_manifest, round_to_rounds, reference_round, g
     verify_rounds(full_manifest, parse_registered=True, print_registered=True)
     registration_apply(full_manifest)
     rprint("\n[green]✅ Registration applied[/green]")
+
+
+def _record_selection(manifest_path, rnd, tag):
+    """Write one round's selection into the manifest as soon as it is made, merging with whatever
+    is already there. Never fatal: a write-back problem must not throw away the rounds still to
+    come, and the full dict is written again at the end of the run."""
+    try:
+        _write_selected_registrations(manifest_path, {rnd: tag})
+    except Exception as e:
+        rprint(f"  [yellow]could not record HCR{rnd} in the manifest yet ({type(e).__name__}: {e}); "
+               f"it will be written with the rest at the end of the run[/yellow]")
+
+
+def _summary_row(rnd, res, cand, how):
+    """One flat row per round for registration_summary.csv. Holds what a reviewer needs to decide
+    whether to trust the round without re-running anything: the pick, the numbers behind it, the
+    red-flag verdict, and the overlay to open."""
+    sev = res.get('severity', 0)
+    cov = (cand['moved'] / max(1, cand['total'])) if cand else float('nan')
+    return dict(
+        round=rnd,
+        selected=how,                                   # auto | picked | kept | FAILED
+        verdict={0: 'OK', 1: 'WARN', 2: 'RED_FLAG'}.get(sev, '?'),
+        severity=sev,
+        tag=(cand['tag'] if cand else res.get('tag', '')),
+        global_tag=res.get('global_tag', ''),
+        radius_um=res.get('radius_um', ''),
+        # Non-zero means the angle scan found the round was filed off-true and corrected it
+        # in-pipeline. Worth seeing in the summary rather than only inside the tag string,
+        # because it points at a hand-rotation that wants fixing at source.
+        angle_deg=res.get('angle_deg', ''),
+        mi=(cand.get('mi', '') if cand else ''),
+        medResid_um=(round(cand['medResid_um'], 2) if cand else ''),
+        frac_under5=(round(cand['frac_under5'], 3) if cand else ''),
+        coverage=(round(cov, 3) if cand else ''),
+        blocks_deformed=(f"{cand['moved']}/{cand['total']}" if cand else ''),
+        flags=' | '.join(res.get('flags', [])),
+        composite=(cand.get('composite', '') if cand else ''),
+    )
+
+
+def _write_summary(full_manifest, summary):
+    """Write registrations/registration_summary.csv and echo the verdict table.
+
+    This is what makes an unattended run reviewable: every pick, its metrics and its red-flag
+    verdict in one file, with the overlay path beside it. Written in attended runs too -- the
+    same table is worth having after a run nobody wrote down."""
+    if not summary:
+        return
+    import csv
+    out = output_root(full_manifest) / 'HCR' / 'registrations' / 'registration_summary.csv'
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, 'w', newline='', encoding='utf-8') as fh:
+            w = csv.DictWriter(fh, fieldnames=list(summary[0].keys()))
+            w.writeheader()
+            w.writerows(summary)
+    except Exception as e:
+        rprint(f"[yellow]could not write {out} ({type(e).__name__}: {e})[/yellow]")
+
+    rprint("\n" + "═" * 72)
+    rprint("[bold] Registration summary[/bold]")
+    rprint("═" * 72)
+    rprint(f"  {'round':<7}{'verdict':<11}{'how':<8}{'medResid':>10}{'frac<5':>8}  global")
+    for r in summary:
+        colour = {'OK': 'green', 'WARN': 'yellow', 'RED_FLAG': 'red'}.get(r['verdict'], 'yellow')
+        mr = f"{r['medResid_um']:>9}u" if r['medResid_um'] != '' else f"{'-':>10}"
+        f5 = f"{r['frac_under5']*100:>7.0f}%" if r['frac_under5'] != '' else f"{'-':>8}"
+        rprint(f"  HCR{r['round']:<4}[{colour}]{r['verdict']:<11}[/{colour}]{r['selected']:<8}"
+               f"{mr}{f5}  [dim]{r['global_tag']}[/dim]")
+    bad = [r for r in summary if r['severity'] >= 1 or r['selected'] == 'FAILED']
+    if bad:
+        rprint(f"\n  [yellow]{len(bad)} round(s) need an eye before use:[/yellow]")
+        for r in bad:
+            rprint(f"    [yellow]HCR{r['round']}[/yellow]: {r['flags'] or 'no local candidates produced'}")
+            if r['composite']:
+                rprint(f"      [dim]{r['composite']}[/dim]")
+    else:
+        rprint("\n  [green]no round was flagged[/green]")
+    rprint(f"  [dim]{out}[/dim]")
 
 
 def _confirm_round_overwrite(rnd, ref, done):
