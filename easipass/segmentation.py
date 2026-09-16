@@ -2253,8 +2253,19 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             f"Please ensure extract_probe_intensity() has completed for HCR round {reference_round['round']}."
         )
 
-    # Every merged table is a pivot of these; a table older than its sources is stale.
+    # Every merged table is a JOIN of two things: the per-round intensity tables, and the
+    # MERGED/aligned_masks correspondence CSVs that say which cell in a round is which cell in
+    # the reference. Both have to count as sources.
+    #
+    # The mapping CSVs were missing from this list until 2026-09-16, and that is not academic:
+    # re-register a round and its mapping CSV is rebuilt, but the intensities are NOT (they are
+    # measured on the acquired frame, so a registration cannot invalidate them). newest_source
+    # therefore never moved, the merge skipped, and the merged tables went on describing the
+    # PREVIOUS registration. Caught on PS393_1L R4 after a registration was rolled back: the
+    # aligned masks were rebuilt at 09:17 and the merged tables were still the 17:23 ones from
+    # the day before.
     intensity_sources = [ref_intensities_path]
+    mapping_sources = []
 
     # Pre-load HCR round mappings and intensities (feature-independent)
     HCR_rounds_names = register_rounds
@@ -2294,13 +2305,19 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
                 f"Please ensure extract_probe_intensity() has completed for HCR round {HCR_round_to_register}."
             )
         intensity_sources.append(round_intensities_path)
+        rmap = HCR_mapping_path / f"{round_file_name}.csv"
+        if rmap.exists():
+            mapping_sources.append(rmap)
 
     # ========== PROCESS EACH FEATURE (now only pivots, no file I/O) ==========
 
     # The gene names become COLUMN LABELS in the pivot below, so a name corrected in the
     # manifest has to reach the merged tables too. Rebuilding one is pivots over data already
     # loaded above, so rebuild on any source that is newer rather than only on absence.
-    newest_source = max(p.stat().st_mtime for p in intensity_sources)
+    _tw = HCR_mapping_path / f"twop_plane{plane}_to_HCR{reference_round['round']}.csv"
+    if _tw.exists():
+        mapping_sources.append(_tw)
+    newest_source = max(p.stat().st_mtime for p in intensity_sources + mapping_sources)
 
     skipped_features = []
     rebuilt_stale = 0
