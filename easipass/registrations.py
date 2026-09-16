@@ -231,13 +231,34 @@ def registration_apply(full_manifest):
     if not ref_out.exists():
         shutil.copyfile(reference_round['image_path'], ref_out)
 
-    pending = [r for r in register_rounds
-               if not (out_dir / f"{get_round_folder_name(r, ref)}.tiff").exists()]
+    def _stale_export(r):
+        """Re-export when the warped stack is MISSING or OLDER than the registration that made
+        it. Existence alone leaves a stack describing a superseded transform, which is the same
+        defect fixed in align_masks_to_reference and extract_probe_intensity. It matters more
+        here than elsewhere because these volumes are what a human opens to eyeball a result --
+        PS393_1L's sat at 2026-04-27 through four re-registrations."""
+        out = out_dir / f"{get_round_folder_name(r, ref)}.tiff"
+        if not out.exists():
+            return True
+        try:
+            reg = output_root(full_manifest) / 'HCR' / 'registrations' / get_round_folder_name(r, ref) \
+                / Path(round_to_rounds[r]['registrations'][0])
+            t = out.stat().st_mtime
+            return any((reg / n).exists() and (reg / n).stat().st_mtime > t
+                       for n in ('_affine.mat', 'deform.zarr'))
+        except Exception:
+            return False
+
+    pending = [r for r in register_rounds if _stale_export(r)]
     if not pending:
         return
 
+    restale = [r for r in pending if (out_dir / f"{get_round_folder_name(r, ref)}.tiff").exists()]
     rprint(f"[bold]Exporting {len(pending)} warped round(s) to full_registered_stacks/[/bold] "
            "[dim](params.export_warped_rounds)[/dim]")
+    if restale:
+        rprint(f"  [yellow]{len(restale)} of them are being re-exported because the registration "
+               f"changed:[/yellow] {', '.join('HCR'+str(r) for r in restale)}")
 
     ref_vol = tif_imread(reference_round['image_path'])
     n_z, n_y, n_x = ref_vol.shape[0], ref_vol.shape[2], ref_vol.shape[3]
