@@ -7,6 +7,7 @@ OUTPUT/
 ├── HCR/
 │   ├── cellpose/                 3D HCR FISH masks
 │   ├── cellpose_aligned/         those masks warped into the reference frame
+│   ├── registrations/            round-to-round transforms + registration_summary.csv
 │   └── extract_intensities/      per-cell fluorescence per channel
 ├── 2P/
 │   ├── cellpose/                 2P cell masks
@@ -23,6 +24,25 @@ overlays that show whether alignment worked.
 Mask naming, in `cellpose/` and `cellpose_aligned/`: the reference round is plain
 `HCR01_masks.tiff`, and non-reference rounds are `HCR{R}_to_HCR{ref}_masks.tiff`, so round 02
 against reference 01 is `HCR02_to_HCR01_masks.tiff`.
+
+## `registration_summary.csv`: what the round-to-round registration chose
+
+`HCR/registrations/registration_summary.csv` is one row per non-reference round, written as each
+pick is made. Under `--auto_hcr_registration` it is the whole audit trail, because no human saw a
+prompt. Read it before reading any merged table.
+
+| Column | |
+|---|---|
+| `selected` | `auto` if this run chose it, `kept` if an already-finished round was reused. A `kept` row carries no metrics |
+| `verdict` · `severity` | `OK` / `WARN` / `RED_FLAG` from the quality gates |
+| `tag` · `global_tag` | the candidate directory the transform came from, so a pick is traceable back to the files that made it |
+| `radius_um` | the `context_radius_um` the coarse stage settled on |
+| `angle_deg` | the rotation the rescue applied, `0.0` when it is off or declined. See [manifest.md](manifest.md) |
+| `medResid_um` · `frac_under5` | median residual across matched cells, and the fraction inside 5 µm. **These are the two numbers to judge a round by**; ~50 % within 5 µm is a good register |
+| `coverage` · `blocks_deformed` | how many local blocks cleared the floors. ⚠ This is participation, not agreement: a *worse* affine can scatter points into peripheral blocks and raise coverage. Never read it as a quality score |
+| `composite` | path to the overlay tiff for that pick |
+
+**`blocks_deformed` of `0` means the round never locked**, whatever the other columns say.
 
 ## QualityCheck: what the overlays are
 

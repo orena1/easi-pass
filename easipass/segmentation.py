@@ -971,7 +971,19 @@ def extract_probe_intensity(full_manifest):
             channels_names = round_to_rounds[HCR_round_to_register]['channels']
         output_folder = output_root(full_manifest) / 'HCR' / 'extract_intensities'
         pkl_output_path = output_folder / f"{round_folder_name}_probs_intensities.pkl"
-        if not pkl_output_path.exists():
+        # Re-extract when the table is MISSING or OLDER than the masks it was measured on.
+        # Existence alone was the gate until 2026-09-16, and it silently served June tables
+        # against September masks: re-segmenting renumbers every label, so the mask_ids in the
+        # old table refer to cells that no longer exist, and the merged tables join on them
+        # anyway. Intensities are measured on the ACQUIRED frame, so the cellpose/ mask is the
+        # only input that can invalidate them -- a changed registration cannot.
+        mask_src = output_root(full_manifest) / 'HCR' / 'cellpose' / f"{round_folder_name}_masks.tiff"
+        stale = (pkl_output_path.exists() and mask_src.exists()
+                 and mask_src.stat().st_mtime > pkl_output_path.stat().st_mtime)
+        if stale:
+            rprint(f"  [yellow]HCR{HCR_round_to_register}: masks are newer than the intensity "
+                   f"table — re-extracting[/yellow]")
+        if not pkl_output_path.exists() or stale:
             to_process.append((HCR_round_to_register, round_folder_name, channels_names))
         else:
             # Already extracted -- the numbers stand, but the manifest may have corrected a name.
@@ -1597,7 +1609,19 @@ def align_masks(full_manifest: dict,
             mov_stack_masks = output_root(full_manifest) / 'HCR' / 'cellpose_aligned' / f"{round_folder_name}_masks.tiff"
 
             save_path = output_folder / f"{round_folder_name}.csv"
+            # Re-match when the CSV is MISSING, OLDER than either mask volume it was computed
+            # from, or written in a superseded format. Existence alone was the gate until
+            # 2026-09-17, and the cohort upgrade of 2026-09-16 exposed it: 12 rounds were
+            # re-registered and re-aligned, every CSV here was kept, and because merge_masks
+            # takes these CSVs as its sources the merged tables stayed fresh-looking too. The
+            # correspondences are computed in the reference frame, so a changed registration
+            # invalidates them even though the acquired-frame intensities survive it.
+            outdated = False
             if save_path.exists():
+                t = save_path.stat().st_mtime
+                outdated = any(p.exists() and p.stat().st_mtime > t
+                               for p in (mov_stack_masks, reference_round_masks))
+            if save_path.exists() and not outdated:
                 existing_df = pd.read_csv(save_path)
                 # Check if file has all required columns; regenerate if stale
                 if ({'iou', 'iou_at_mask1_z', 'is_best_match'}
@@ -1608,6 +1632,10 @@ def align_masks(full_manifest: dict,
                 else:
                     print(f"  {round_folder_name}: stale format, regenerating...")
                     save_path.unlink()
+            elif outdated:
+                rprint(f"  [yellow]{round_folder_name}: aligned masks are newer than the mask "
+                       f"alignment — re-matching[/yellow]")
+                save_path.unlink()
             # calculate the matching masks and the overlap
             mask1_to_mask2_df = match_masks(mov_stack_masks, reference_round_masks)
             mask1_to_mask2_df.to_csv(save_path)
@@ -2241,8 +2269,19 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
             f"Please ensure extract_probe_intensity() has completed for HCR round {reference_round['round']}."
         )
 
-    # Every merged table is a pivot of these; a table older than its sources is stale.
+    # Every merged table is a JOIN of two things: the per-round intensity tables, and the
+    # MERGED/aligned_masks correspondence CSVs that say which cell in a round is which cell in
+    # the reference. Both have to count as sources.
+    #
+    # The mapping CSVs were missing from this list until 2026-09-16, and that is not academic:
+    # re-register a round and its mapping CSV is rebuilt, but the intensities are NOT (they are
+    # measured on the acquired frame, so a registration cannot invalidate them). newest_source
+    # therefore never moved, the merge skipped, and the merged tables went on describing the
+    # PREVIOUS registration. Caught on PS393_1L R4 after a registration was rolled back: the
+    # aligned masks were rebuilt at 09:17 and the merged tables were still the 17:23 ones from
+    # the day before.
     intensity_sources = [ref_intensities_path]
+    mapping_sources = []
 
     # Pre-load HCR round mappings and intensities (feature-independent)
     HCR_rounds_names = register_rounds
@@ -2282,13 +2321,19 @@ def merge_masks(full_manifest: dict, session: dict, only_hcr: bool = False):
                 f"Please ensure extract_probe_intensity() has completed for HCR round {HCR_round_to_register}."
             )
         intensity_sources.append(round_intensities_path)
+        rmap = HCR_mapping_path / f"{round_file_name}.csv"
+        if rmap.exists():
+            mapping_sources.append(rmap)
 
     # ========== PROCESS EACH FEATURE (now only pivots, no file I/O) ==========
 
     # The gene names become COLUMN LABELS in the pivot below, so a name corrected in the
     # manifest has to reach the merged tables too. Rebuilding one is pivots over data already
     # loaded above, so rebuild on any source that is newer rather than only on absence.
-    newest_source = max(p.stat().st_mtime for p in intensity_sources)
+    _tw = HCR_mapping_path / f"twop_plane{plane}_to_HCR{reference_round['round']}.csv"
+    if _tw.exists():
+        mapping_sources.append(_tw)
+    newest_source = max(p.stat().st_mtime for p in intensity_sources + mapping_sources)
 
     skipped_features = []
     rebuilt_stale = 0

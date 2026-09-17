@@ -11,7 +11,27 @@ HCR_to_HCR_registration:{
         "context_radius_um":[40, 60, 80]  // searched (downsampled, cheap); best auto-picked. ~60um is near-universal
         "match_threshold":0.3          // context-correlation cutoff for a centroid match
         "select_metric":"mi"           // pick best radius: "mi" (default) | "median_resid" | "above_chance" (all guarded vs worse-than-chance)
-        // no rotation cap: the RANSAC affine is used as-is
+
+        // ROTATION RESCUE -- OFF by default (angle_search_deg 0), opt in per sample.
+        // _contexts correlates AXIS-ALIGNED patches, so there is no rotation invariance
+        // anywhere in this matcher, and the QC test only tries 0/90/180/270. A round left a
+        // few degrees off by hand degrades silently and is dead somewhere past 5-8 degrees:
+        // PS393_1L R3 sat ~8 deg out with 556 mutual inliers, and 1498 once corrected.
+        // Scanned at ONE radius, scored by above_chance, and only the winning angle goes on
+        // to the radius sweep, so it costs one extra pass (~35 s), not angles x radii.
+        // The volume is rotated NEAREST-NEIGHBOUR and the centroids analytically, so nothing
+        // is resampled or softened; probe intensities are measured on the acquired stack and
+        // never pass through this at all.
+        // "angle_search_deg":15        // half-span: scans -15..+15. 0 = off
+        // "angle_step_deg":5           // step within the span
+        // "angle_scan_radius_um":80    // default: the largest context_radius_um (most discriminative)
+        // "angle_keep_zero_margin":2.0 // a non-zero angle must beat 0 deg by this FACTOR on
+                                        // above_chance before it is accepted, so a healthy round
+                                        // keeps 0 and the sweep after it is bit-identical to a
+                                        // run with the scan off. 2.0 is measured, not guessed:
+                                        // across 10 rounds in 5 samples every healthy round's
+                                        // best angle beat 0 by at most 1.33x, while the one
+                                        // genuinely rotated round beat it by 2.6x.
     }
     "local":{
         "blocksize":[[200,200,10]]     // fixed winner (cortex+PBN screen); add more here to search if tissue differs
