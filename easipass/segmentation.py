@@ -1609,7 +1609,19 @@ def align_masks(full_manifest: dict,
             mov_stack_masks = output_root(full_manifest) / 'HCR' / 'cellpose_aligned' / f"{round_folder_name}_masks.tiff"
 
             save_path = output_folder / f"{round_folder_name}.csv"
+            # Re-match when the CSV is MISSING, OLDER than either mask volume it was computed
+            # from, or written in a superseded format. Existence alone was the gate until
+            # 2026-09-17, and the cohort upgrade of 2026-09-16 exposed it: 12 rounds were
+            # re-registered and re-aligned, every CSV here was kept, and because merge_masks
+            # takes these CSVs as its sources the merged tables stayed fresh-looking too. The
+            # correspondences are computed in the reference frame, so a changed registration
+            # invalidates them even though the acquired-frame intensities survive it.
+            outdated = False
             if save_path.exists():
+                t = save_path.stat().st_mtime
+                outdated = any(p.exists() and p.stat().st_mtime > t
+                               for p in (mov_stack_masks, reference_round_masks))
+            if save_path.exists() and not outdated:
                 existing_df = pd.read_csv(save_path)
                 # Check if file has all required columns; regenerate if stale
                 if ({'iou', 'iou_at_mask1_z', 'is_best_match'}
@@ -1620,6 +1632,10 @@ def align_masks(full_manifest: dict,
                 else:
                     print(f"  {round_folder_name}: stale format, regenerating...")
                     save_path.unlink()
+            elif outdated:
+                rprint(f"  [yellow]{round_folder_name}: aligned masks are newer than the mask "
+                       f"alignment — re-matching[/yellow]")
+                save_path.unlink()
             # calculate the matching masks and the overlap
             mask1_to_mask2_df = match_masks(mov_stack_masks, reference_round_masks)
             mask1_to_mask2_df.to_csv(save_path)
