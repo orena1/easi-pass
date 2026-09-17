@@ -44,6 +44,21 @@
                 context_radius_um: [40, 60, 80]   // all searched; best auto-picked
                 match_threshold: 0.3              // lower to 0.2 if rounds register poorly
                 select_metric: "mi"
+
+                // ROTATION RESCUE -- off by default, uncomment to enable.
+                // The matcher correlates AXIS-ALIGNED patches and has no rotation invariance,
+                // and the QC test only tries 0/90/180/270. A round mounted a few degrees off
+                // therefore degrades silently and stops registering somewhere past 5-8 deg.
+                // Turn this on when a round fails and its overlay looks slightly rotated.
+                // angle_search_deg: 15           // half-span: scans -15..+15. 0 = off
+                // angle_step_deg: 5              // step within the span
+                // angle_scan_radius_um: 80       // default: the largest context_radius_um
+                // angle_keep_zero_margin: 2.0    // a non-zero angle must beat 0 deg by this
+                                                  // factor before it is taken, so a healthy
+                                                  // round stays at 0 and the scan is a rescue
+                                                  // and not a re-optimisation. Measured on 10
+                                                  // rounds across 5 samples; do not lower it
+                                                  // without re-running that sweep.
             }
             local: {
                 blocksize: [[200, 200, 10]]

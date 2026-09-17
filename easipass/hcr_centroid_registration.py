@@ -71,16 +71,22 @@ except ImportError:  # running in a notebook / as a flat module
 _GLOBAL_DEFAULTS = dict(
     method="centroid",
     context_radius_um=[40.0, 60.0, 80.0],  # searched (downsampled, cheap); best auto-picked by select_metric
-    # Residual in-plane rotation search. 0 = OFF, which is the shipped behaviour and leaves every
-    # existing sample bit-identical. _contexts has no rotation invariance, and the QC rotation
-    # test only tries 0/90/180/270, so a hand-rotation left a few degrees off degrades silently
-    # and dies somewhere past ~5-8 degrees (PS393_1L R3: 8 degrees out, 556 mutual inliers at 0,
-    # 1498 once corrected). Scanned at one radius, scored by above_chance, winner goes on to the
-    # radius sweep -- so it adds one pass, not len(angles) x len(radii) candidates on disk.
-    # ON by default from 2026-09-15: 7 angles at ~5 s each is ~35 s against a ~45 min round, and
-    # 5 deg steps are inside the matcher's own tolerance (PS393_1L R5 was 4 deg off and R7 2 deg
-    # off; both registered fine at 0, while R3 at 8 deg was dead).
-    angle_search_deg=15.0,           # half-span; 15 scans -15..+15. 0 disables the scan.
+    # Residual in-plane rotation search. OFF by default, so every existing sample re-runs
+    # bit-identical and this is opt-in per manifest: set params.hcr_to_hcr_registration.global
+    # .angle_search_deg to 15 to turn it on. See docs/manifest.md, "Rotation rescue".
+    #
+    # _contexts has no rotation invariance, and the QC rotation test only tries 0/90/180/270, so
+    # a hand-rotation left a few degrees off degrades silently and dies somewhere past ~5-8
+    # degrees (PS393_1L R3: 8 degrees out, 556 mutual inliers at 0, 1498 once corrected). Scanned
+    # at one radius, scored by above_chance, winner goes on to the radius sweep -- so it adds one
+    # pass, not len(angles) x len(radii) candidates on disk. 7 angles at ~5 s each is ~35 s
+    # against a ~45 min round, and 5 deg steps are inside the matcher's own tolerance (PS393_1L
+    # R5 was 4 deg off and R7 2 deg off; both registered fine at 0, while R3 at 8 deg was dead).
+    #
+    # It is OFF rather than ON because turning it on CAN move a round that already registers:
+    # PS388_1L R03 and R07 took -10 and +10 deg on 2026-09-16 and both improved, but that is a
+    # result to opt into per sample, not one to hand every existing dataset on its next re-run.
+    angle_search_deg=0.0,            # half-span; 15 scans -15..+15. 0 disables the scan.
     angle_step_deg=5.0,
     angle_scan_radius_um=None,       # default: the largest context radius (most discriminative)
     # A non-zero angle must beat 0 deg by this FACTOR on above_chance before it is accepted, so
@@ -591,7 +597,7 @@ def global_centroid(S, gcfg, emit=None, batch=2000):
             if ab_a > best_sc:
                 best_sc, ang_best = ab_a, ang
         # RESCUE, not re-optimisation: keep 0 unless another angle clears it by the margin.
-        margin = float(gcfg.get('angle_keep_zero_margin', 1.15) or 1.0)
+        margin = float(gcfg.get('angle_keep_zero_margin', 2.0) or 1.0)
         if zero_sc is not None and abs(ang_best) >= 1e-9 and best_sc <= max(zero_sc, 0) * margin:
             rprint(f"      best {ang_best:+.0f} deg ({best_sc}) does not clear 0 deg "
                    f"({zero_sc}) by {margin:g}x -- [b]keeping 0[/b]")
@@ -902,7 +908,7 @@ def _print_ladder(round_to_rounds, ref, gcfg, lcfg, unattended=False):
         n = len(_angle_list(gcfg))
         rprint(f"            + rotation rescue · {n} angles ±{ang:g}° step "
                f"{float(gcfg.get('angle_step_deg', 4)):g}° · keeps 0° unless another angle beats "
-               f"it by {float(gcfg.get('angle_keep_zero_margin', 1.15)):g}x")
+               f"it by {float(gcfg.get('angle_keep_zero_margin', 2.0)):g}x")
     rprint(f"  [cyan]2 FINE  [/cyan]  local warps · block size {blocks}")
     if unattended:
         # Says what this run will actually do. The attended wording below promises a prompt that

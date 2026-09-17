@@ -107,15 +107,43 @@ and has no rotation invariance, so a residual angle θ displaces a feature at th
 is tolerated; past roughly 5–8° the round dies. A coarse hand-rotation to `_to_HCR01` is not
 enough on its own, and a 0/90/180/270 check cannot see the residual.
 
-`global.angle_search_deg` (default 15, step 5) scans for it and corrects it in-pipeline, leaving
-the filed TIFF untouched. It is a **rescue, not a re-optimisation**: a non-zero angle is only
-taken if it beats 0° by `angle_keep_zero_margin` (default 2.0) on above-chance inliers, so a
-healthy round is left exactly as it was. Widen the span if a round still fails. The chosen angle
-appears in `registration_summary.csv` as `angle_deg` and in the candidate tag as `_a+12`.
+**`global.angle_search_deg` is `0`, so the scan is OFF until you ask for it.** Set it to `15` to
+turn it on for a sample. There is a commented block ready to uncomment in
+[`demo_hcr_only.hjson`](../examples/demo_hcr_only.hjson),
+[`demo_tiff.hjson`](../examples/demo_tiff.hjson) and
+[`param_example.hjson`](../examples/param_example.hjson):
+
+```hjson
+global: {
+    context_radius_um: [40, 60, 80]
+    match_threshold: 0.3
+    select_metric: "mi"
+
+    angle_search_deg: 15           // half-span: scans -15..+15. 0 = off
+    angle_step_deg: 5              // step within the span
+    angle_scan_radius_um: 80       // default: the largest context_radius_um
+    angle_keep_zero_margin: 2.0    // how far a non-zero angle must beat 0° by
+}
+```
+
+It corrects the angle in-pipeline and leaves the filed TIFF untouched. It is a **rescue, not a
+re-optimisation**: a non-zero angle is only taken if it beats 0° by `angle_keep_zero_margin` on
+above-chance inliers, so a healthy round is left exactly as it was. Widen the span if a round
+still fails. The chosen angle appears in `registration_summary.csv` as `angle_deg` and in the
+candidate tag as `_a+12`.
+
+⚠ **Turning it on can move a round that already registers.** PS388_1L R03 and R07 took −10° and
++10° once it was enabled, and both improved, but that is a result to opt into per sample. This is
+why the default is `0`: every existing dataset re-runs bit-identical unless you set the key.
+
+**Nothing is resampled.** The volume is rotated nearest-neighbour and the centroids
+analytically, so no intensity is interpolated or softened. Probe intensities are measured on the
+acquired stack through `HCR/cellpose/` masks and never pass through the registration at all, so
+no registration setting can alter a probe number.
 
 | Knob | Default | |
 |---|---|---|
-| `angle_search_deg` | `15` | half-span in degrees; `0` disables the scan |
+| `angle_search_deg` | `0` | half-span in degrees; `0` disables the scan. Set `15` to enable |
 | `angle_step_deg` | `5` | 5° is inside the matcher's own tolerance |
 | `angle_keep_zero_margin` | `2.0` | how much a non-zero angle must beat 0° by. Lowering it re-optimises rounds that already work — measured across 5 samples, healthy rounds peak at 1.33× while a genuinely rotated one reached 2.6× |
 | `angle_scan_radius_um` | largest `context_radius_um` | radius the scan is scored at |
